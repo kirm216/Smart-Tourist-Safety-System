@@ -1,0 +1,67 @@
+{
+  "project_info": {
+    "project_number": "711894981384",
+    "project_id": "smart-tourist-safety-sys-f8297",
+    "storage_bucket": "smart-tourist-safety-sys-f8297.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:711894981384:android:1cdcf348551f50c6942abd",
+        "android_client_info": {
+          "package_name": "com.example.hello_test"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoJfag0I7MToHc2ofMr3JUh_v8SJeth_8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:711894981384:android:8f40aa31c209fc33942abd",
+        "android_client_info": {
+          "package_name": "com.example.tourist_safety_new"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoJfag0I7MToHc2ofMr3JUh_v8SJeth_8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:711894981384:android:5ec12861fd562cf3942abd",
+        "android_client_info": {
+          "package_name": "com.example.tourist_safety_system"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDoJfag0I7MToHc2ofMr3JUh_v8SJeth_8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
