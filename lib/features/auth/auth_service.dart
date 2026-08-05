@@ -42,5 +42,9 @@ class AuthService {
     await _auth.signOut();
   }
 
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
   User? get currentUser => _auth.currentUser;
+
+  bool get isSignedIn => _auth.currentUser != null;
 }
