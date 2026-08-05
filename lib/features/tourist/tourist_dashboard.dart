@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
 import '../profile/profile_screen.dart';
+import 'maps_screen.dart';
 
 class TouristDashboard extends StatelessWidget {
   const TouristDashboard({super.key});
@@ -111,7 +112,7 @@ class TouristDashboard extends StatelessWidget {
                             color: Theme.of(
                               context,
                             ).colorScheme.primaryContainer,
-                            onTap: () => _navigateToSection(context, 'Maps'),
+                            onTap: () => _openMaps(context),
                             width: cardWidth,
                           ),
                           _ActionCard(
@@ -181,6 +182,12 @@ class TouristDashboard extends StatelessWidget {
           behavior: SnackBarBehavior.floating,
         ),
       );
+  }
+
+  void _openMaps(BuildContext context) {
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute<void>(builder: (context) => const MapsScreen()));
   }
 
   void _openProfile(BuildContext context) {
