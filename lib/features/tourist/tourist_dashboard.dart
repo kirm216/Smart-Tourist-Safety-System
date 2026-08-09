@@ -1,4 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 
 import '../auth/auth_service.dart';
 import '../profile/profile_screen.dart';
@@ -102,7 +104,7 @@ class TouristDashboard extends StatelessWidget {
                             subtitle: 'Emergency alert',
                             icon: Icons.warning_amber_outlined,
                             color: Theme.of(context).colorScheme.errorContainer,
-                            onTap: () => _navigateToSection(context, 'SOS'),
+                            onTap: () => _confirmAndSendSOS(context),
                             width: cardWidth,
                           ),
                           _ActionCard(
@@ -164,6 +166,21 @@ class TouristDashboard extends StatelessWidget {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    height: 60,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: Theme.of(context).colorScheme.error,
+                        foregroundColor: Theme.of(context).colorScheme.onError,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                      ),
+                      onPressed: () => _confirmAndSendSOS(context),
+                      child: const Text('Send SOS Alert'),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -181,6 +198,114 @@ class TouristDashboard extends StatelessWidget {
           content: Text('Navigation placeholder: $section screen coming soon.'),
           behavior: SnackBarBehavior.floating,
         ),
+      );
+  }
+
+  Future<void> _confirmAndSendSOS(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Send SOS Alert'),
+          content: const Text(
+            'Are you sure you want to send an SOS alert with your current location?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(true),
+              child: const Text('Send'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        _sendSOS(context);
+        return const AlertDialog(
+          content: SizedBox(
+            height: 120,
+            child: Center(child: CircularProgressIndicator()),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _sendSOS(BuildContext context) async {
+    try {
+      final user = AuthService().currentUser;
+      if (user == null) {
+        _showSnackBar(context, 'Unable to send SOS. Please sign in again.');
+        Navigator.of(context).pop();
+        return;
+      }
+
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _showSnackBar(
+          context,
+          'Location services are disabled. Please enable them and try again.',
+        );
+        Navigator.of(context).pop();
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _showSnackBar(
+          context,
+          'Location permission denied. Please allow location access and try again.',
+        );
+        Navigator.of(context).pop();
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      final fullName = user.displayName ?? '';
+      await FirebaseFirestore.instance.collection('sos_alerts').add({
+        'userId': user.uid,
+        'fullName': fullName,
+        'email': user.email ?? '',
+        'latitude': position.latitude,
+        'longitude': position.longitude,
+        'timestamp': FieldValue.serverTimestamp(),
+        'status': 'active',
+        'resolved': false,
+      });
+
+      Navigator.of(context).pop();
+      _showSnackBar(context, 'SOS alert sent successfully.');
+    } catch (error) {
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+      _showSnackBar(context, 'Unable to send SOS: ${error.toString()}');
+    }
+  }
+
+  void _showSnackBar(BuildContext context, String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
   }
 
