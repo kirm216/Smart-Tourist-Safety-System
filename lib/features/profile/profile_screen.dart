@@ -196,7 +196,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       if (user != null) {
                         Navigator.of(context).push(
                           MaterialPageRoute<void>(
-                            builder: (context) => const EmergencyContactsScreen(),
+                            builder: (context) =>
+                                const EmergencyContactsScreen(),
                           ),
                         );
                       }
