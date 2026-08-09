@@ -1,3 +1,4 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -11,15 +12,20 @@ class MapsScreen extends StatefulWidget {
 }
 
 class _MapsScreenState extends State<MapsScreen> {
+  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+
   bool _isLoading = true;
   bool _permissionDenied = false;
   String? _errorMessage;
+  String? _safeZoneError;
   Position? _position;
+  final List<SafeZone> _safeZones = [];
 
   @override
   void initState() {
     super.initState();
     _initializeLocation();
+    _loadSafeZones();
   }
 
   Future<void> _initializeLocation() async {
@@ -64,6 +70,35 @@ class _MapsScreenState extends State<MapsScreen> {
     }
   }
 
+  Future<void> _loadSafeZones() async {
+    try {
+      final snapshot = await _firestore.collection('safe_zones').get();
+      final zones = snapshot.docs.map((doc) {
+        final data = doc.data();
+        return SafeZone(
+          id: doc.id,
+          name: (data['name'] as String?)?.trim() ?? 'Unnamed zone',
+          description: (data['description'] as String?)?.trim() ?? '',
+          type: (data['type'] as String?)?.trim() ?? 'Tourist Help',
+          latitude: (data['latitude'] as num?)?.toDouble() ?? 0.0,
+          longitude: (data['longitude'] as num?)?.toDouble() ?? 0.0,
+          radius: (data['radius'] as num?)?.toDouble() ?? 0,
+        );
+      }).where((zone) => zone.latitude != 0.0 && zone.longitude != 0.0).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _safeZones.clear();
+        _safeZones.addAll(zones);
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _safeZoneError = error.toString();
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -91,28 +126,77 @@ class _MapsScreenState extends State<MapsScreen> {
 
     final currentLocation = LatLng(_position!.latitude, _position!.longitude);
 
-    return FlutterMap(
-      options: MapOptions(center: currentLocation, zoom: 15, maxZoom: 18),
+    return Column(
       children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.hello_test',
-        ),
-        MarkerLayer(
-          markers: [
-            Marker(
-              point: currentLocation,
-              width: 60,
-              height: 60,
-              builder: (context) {
-                return const Icon(
-                  Icons.location_pin,
-                  color: Colors.redAccent,
-                  size: 48,
-                );
-              },
+        if (_safeZoneError != null)
+          Container(
+            width: double.infinity,
+            color: Theme.of(context).colorScheme.errorContainer,
+            padding: const EdgeInsets.all(12),
+            child: Text(
+              'Unable to load safe zones: $_safeZoneError',
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
             ),
-          ],
+          ),
+        Expanded(
+          child: FlutterMap(
+            options: MapOptions(center: currentLocation, zoom: 15, maxZoom: 18),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.hello_test',
+              ),
+              if (_safeZones.isNotEmpty)
+                CircleLayer(
+                  circles: _safeZones.map((zone) {
+                    final color = zone.markerColor.withOpacity(0.25);
+                    return CircleMarker(
+                      point: LatLng(zone.latitude, zone.longitude),
+                      radius: zone.radius,
+                      useRadiusInMeter: true,
+                      color: color,
+                      borderColor: zone.markerColor,
+                      borderStrokeWidth: 2,
+                    );
+                  }).toList(),
+                ),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: currentLocation,
+                    width: 60,
+                    height: 60,
+                    builder: (context) {
+                      return const Icon(
+                        Icons.location_pin,
+                        color: Colors.redAccent,
+                        size: 48,
+                      );
+                    },
+                  ),
+                  ..._safeZones.map((zone) {
+                    return Marker(
+                      point: LatLng(zone.latitude, zone.longitude),
+                      width: 48,
+                      height: 48,
+                      builder: (context) {
+                        return GestureDetector(
+                          onTap: () => _showZoneDetails(context, zone),
+                          child: Icon(
+                            Icons.location_on,
+                            color: zone.markerColor,
+                            size: 40,
+                          ),
+                        );
+                      },
+                    );
+                  }).toList(),
+                ],
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -169,5 +253,87 @@ class _MapsScreenState extends State<MapsScreen> {
         ),
       ),
     );
+  }
+
+  void _showZoneDetails(BuildContext context, SafeZone zone) {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                zone.name,
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                zone.description,
+                style: Theme.of(context).textTheme.bodyLarge,
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Icon(Icons.circle, color: zone.markerColor, size: 16),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Radius: ${zone.radius.toStringAsFixed(0)}m',
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class SafeZone {
+  SafeZone({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.type,
+    required this.latitude,
+    required this.longitude,
+    required this.radius,
+  });
+
+  final String id;
+  final String name;
+  final String description;
+  final String type;
+  final double latitude;
+  final double longitude;
+  final double radius;
+
+  Color get markerColor {
+    switch (type.toLowerCase()) {
+      case 'police':
+        return Colors.blue;
+      case 'hospital':
+        return Colors.green;
+      case 'tourist help':
+      case 'tourist_help':
+      case 'tourist':
+        return Colors.orange;
+      default:
+        return Colors.orange;
+    }
   }
 }
