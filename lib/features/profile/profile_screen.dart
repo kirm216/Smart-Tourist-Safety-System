@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
+import '../emergency_contacts/emergency_contacts_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -170,7 +171,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(24),
                     ),
-                    color: colorScheme.surfaceVariant,
+                    color: colorScheme.surface,
                     child: Padding(
                       padding: const EdgeInsets.all(20),
                       child: Column(
@@ -188,6 +189,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ],
                       ),
                     ),
+                  ),
+                  const SizedBox(height: 20),
+                  FilledButton(
+                    onPressed: () {
+                      if (user != null) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (context) => const EmergencyContactsScreen(),
+                          ),
+                        );
+                      }
+                    },
+                    child: const Text('Emergency Contacts'),
                   ),
                   const SizedBox(height: 20),
                   Form(
