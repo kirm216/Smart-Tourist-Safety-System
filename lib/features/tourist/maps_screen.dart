@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+
+import '../auth/auth_service.dart';
 
 class MapsScreen extends StatefulWidget {
   const MapsScreen({super.key});
@@ -14,6 +18,9 @@ class MapsScreen extends StatefulWidget {
 class _MapsScreenState extends State<MapsScreen> {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
+  StreamSubscription<Position>? _positionStreamSubscription;
+  final Map<String, bool> _zoneMembership = {};
+
   bool _isLoading = true;
   bool _permissionDenied = false;
   String? _errorMessage;
@@ -24,8 +31,8 @@ class _MapsScreenState extends State<MapsScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeLocation();
     _loadSafeZones();
+    _initializeLocation();
   }
 
   Future<void> _initializeLocation() async {
@@ -53,14 +60,7 @@ class _MapsScreenState extends State<MapsScreen> {
         return;
       }
 
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      );
-
-      setState(() {
-        _isLoading = false;
-        _position = position;
-      });
+      _startPositionStream();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -68,6 +68,34 @@ class _MapsScreenState extends State<MapsScreen> {
         _errorMessage = error.toString();
       });
     }
+  }
+
+  void _startPositionStream() {
+    _positionStreamSubscription =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 10,
+          ),
+        ).listen(
+          (position) {
+            if (!mounted) return;
+
+            setState(() {
+              _isLoading = false;
+              _position = position;
+            });
+
+            _checkSafeZones(position);
+          },
+          onError: (error) {
+            if (!mounted) return;
+            setState(() {
+              _isLoading = false;
+              _errorMessage = error.toString();
+            });
+          },
+        );
   }
 
   Future<void> _loadSafeZones() async {
@@ -94,12 +122,83 @@ class _MapsScreenState extends State<MapsScreen> {
         _safeZones.clear();
         _safeZones.addAll(zones);
       });
+
+      if (_position != null) {
+        _checkSafeZones(_position!);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
         _safeZoneError = error.toString();
       });
     }
+  }
+
+  void _checkSafeZones(Position position) {
+    for (final zone in _safeZones) {
+      final isInside =
+          Geolocator.distanceBetween(
+            position.latitude,
+            position.longitude,
+            zone.latitude,
+            zone.longitude,
+          ) <=
+          zone.radius;
+
+      final wasInside = _zoneMembership[zone.id] ?? false;
+      if (isInside && !wasInside) {
+        _zoneMembership[zone.id] = true;
+        _saveGeoFenceAlert(zone, position, 'ENTER');
+        _showGeoFenceSnackBar('You entered ${zone.name}');
+      } else if (!isInside && wasInside) {
+        _zoneMembership[zone.id] = false;
+        _saveGeoFenceAlert(zone, position, 'EXIT');
+        _showGeoFenceSnackBar('You left ${zone.name}');
+      }
+    }
+  }
+
+  Future<void> _saveGeoFenceAlert(
+    SafeZone zone,
+    Position position,
+    String eventType,
+  ) async {
+    final user = AuthService().currentUser;
+    if (user == null) return;
+
+    final alertData = {
+      'userId': user.uid,
+      'userName': user.displayName ?? '',
+      'userEmail': user.email ?? '',
+      'safeZoneId': zone.id,
+      'safeZoneName': zone.name,
+      'eventType': eventType,
+      'latitude': position.latitude,
+      'longitude': position.longitude,
+      'timestamp': FieldValue.serverTimestamp(),
+      'status': 'unread',
+    };
+
+    try {
+      await _firestore.collection('geo_fence_alerts').add(alertData);
+    } catch (_) {
+      // Ignore failures to preserve map experience; alerts are best-effort.
+    }
+  }
+
+  void _showGeoFenceSnackBar(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+  }
+
+  @override
+  void dispose() {
+    _positionStreamSubscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -154,7 +253,9 @@ class _MapsScreenState extends State<MapsScreen> {
               if (_safeZones.isNotEmpty)
                 CircleLayer(
                   circles: _safeZones.map((zone) {
-                    final color = zone.markerColor.withOpacity(0.25);
+                    final color = zone.markerColor.withAlpha(
+                      (0.25 * 255).round(),
+                    );
                     return CircleMarker(
                       point: LatLng(zone.latitude, zone.longitude),
                       radius: zone.radius,
@@ -195,7 +296,7 @@ class _MapsScreenState extends State<MapsScreen> {
                         );
                       },
                     );
-                  }).toList(),
+                  }),
                 ],
               ),
             ],
