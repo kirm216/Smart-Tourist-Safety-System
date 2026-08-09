@@ -73,18 +73,21 @@ class _MapsScreenState extends State<MapsScreen> {
   Future<void> _loadSafeZones() async {
     try {
       final snapshot = await _firestore.collection('safe_zones').get();
-      final zones = snapshot.docs.map((doc) {
-        final data = doc.data();
-        return SafeZone(
-          id: doc.id,
-          name: (data['name'] as String?)?.trim() ?? 'Unnamed zone',
-          description: (data['description'] as String?)?.trim() ?? '',
-          type: (data['type'] as String?)?.trim() ?? 'Tourist Help',
-          latitude: (data['latitude'] as num?)?.toDouble() ?? 0.0,
-          longitude: (data['longitude'] as num?)?.toDouble() ?? 0.0,
-          radius: (data['radius'] as num?)?.toDouble() ?? 0,
-        );
-      }).where((zone) => zone.latitude != 0.0 && zone.longitude != 0.0).toList();
+      final zones = snapshot.docs
+          .map((doc) {
+            final data = doc.data();
+            return SafeZone(
+              id: doc.id,
+              name: (data['name'] as String?)?.trim() ?? 'Unnamed zone',
+              description: (data['description'] as String?)?.trim() ?? '',
+              type: (data['type'] as String?)?.trim() ?? 'Tourist Help',
+              latitude: (data['latitude'] as num?)?.toDouble() ?? 0.0,
+              longitude: (data['longitude'] as num?)?.toDouble() ?? 0.0,
+              radius: (data['radius'] as num?)?.toDouble() ?? 0,
+            );
+          })
+          .where((zone) => zone.latitude != 0.0 && zone.longitude != 0.0)
+          .toList();
 
       if (!mounted) return;
       setState(() {
@@ -136,8 +139,8 @@ class _MapsScreenState extends State<MapsScreen> {
             child: Text(
               'Unable to load safe zones: $_safeZoneError',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onErrorContainer,
-                  ),
+                color: Theme.of(context).colorScheme.onErrorContainer,
+              ),
             ),
           ),
         Expanded(
@@ -271,8 +274,8 @@ class _MapsScreenState extends State<MapsScreen> {
               Text(
                 zone.name,
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: 12),
               Text(
