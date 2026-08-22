@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../admin/admin_dashboard.dart';
+import '../admin/admin_service.dart';
+import '../tourist/tourist_dashboard.dart';
 import 'auth_service.dart';
 import 'register_screen.dart';
 
@@ -16,6 +19,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
 
   final AuthService _authService = AuthService();
+  final AdminService _adminService = AdminService();
 
   bool _isLoading = false;
   bool _obscurePassword = true;
@@ -27,16 +31,38 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  Future<void> _login() async {
+  Future<void> _login({required bool adminLogin}) async {
     if (!_formKey.currentState!.validate()) return;
 
     FocusScope.of(context).unfocus();
     setState(() => _isLoading = true);
 
     try {
-      await _authService.login(
+      final credential = await _authService.login(
         email: _emailController.text.trim(),
         password: _passwordController.text,
+      );
+      final user = credential.user;
+      if (user == null) {
+        throw Exception('Unable to identify the signed-in user.');
+      }
+
+      if (adminLogin && !await _adminService.isAdmin(user.uid)) {
+        await _authService.logout();
+        if (!mounted) return;
+        _showErrorSnackBar(
+          'This account is not authorized as an administrator.',
+        );
+        return;
+      }
+
+      if (!mounted) return;
+
+      await Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) =>
+              adminLogin ? const AdminDashboard() : const TouristDashboard(),
+        ),
       );
     } on Exception catch (e) {
       if (!mounted) return;
@@ -139,7 +165,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                   AutovalidateMode.onUserInteraction,
                               enabled: !_isLoading,
                               onFieldSubmitted: (_) {
-                                if (!_isLoading) _login();
+                                if (!_isLoading) _login(adminLogin: false);
                               },
                               decoration: InputDecoration(
                                 labelText: 'Password',
@@ -175,7 +201,9 @@ class _LoginScreenState extends State<LoginScreen> {
                             ),
                             const SizedBox(height: 24),
                             FilledButton(
-                              onPressed: _isLoading ? null : _login,
+                              onPressed: _isLoading
+                                  ? null
+                                  : () => _login(adminLogin: false),
                               child: _isLoading
                                   ? SizedBox(
                                       height: 22,
@@ -185,7 +213,14 @@ class _LoginScreenState extends State<LoginScreen> {
                                         color: colorScheme.onPrimary,
                                       ),
                                     )
-                                  : const Text('Login'),
+                                  : const Text('Tourist Login'),
+                            ),
+                            const SizedBox(height: 12),
+                            OutlinedButton(
+                              onPressed: _isLoading
+                                  ? null
+                                  : () => _login(adminLogin: true),
+                              child: const Text('Admin Login'),
                             ),
                           ],
                         ),

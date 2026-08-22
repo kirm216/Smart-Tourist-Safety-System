@@ -1,6 +1,8 @@
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
+import 'features/admin/admin_dashboard.dart';
+import 'features/admin/admin_service.dart';
 import 'features/auth/auth_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/tourist/tourist_dashboard.dart';
@@ -44,11 +46,36 @@ class AuthGate extends StatelessWidget {
           );
         }
 
-        if (snapshot.hasData) {
-          return const TouristDashboard();
+        final user = snapshot.data;
+        if (user == null) {
+          return const LoginScreen();
         }
 
-        return const LoginScreen();
+        return FutureBuilder<bool>(
+          future: AdminService().isAdmin(user.uid),
+          builder: (context, adminSnapshot) {
+            if (adminSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(
+                body: Center(child: CircularProgressIndicator()),
+              );
+            }
+
+            if (adminSnapshot.hasError) {
+              return const Scaffold(
+                body: Center(
+                  child: Text(
+                    'Unable to verify administrator access. Please try again.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              );
+            }
+
+            return adminSnapshot.data == true
+                ? const AdminDashboard()
+                : const TouristDashboard();
+          },
+        );
       },
     );
   }
