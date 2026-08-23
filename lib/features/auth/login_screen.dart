@@ -1,10 +1,7 @@
 import 'package:flutter/material.dart';
-
-import '../admin/admin_dashboard.dart';
-import '../admin/admin_service.dart';
-import '../tourist/tourist_dashboard.dart';
-import 'auth_service.dart';
 import 'register_screen.dart';
+import '../admin/admin_service.dart';
+import 'auth_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -55,15 +52,6 @@ class _LoginScreenState extends State<LoginScreen> {
         );
         return;
       }
-
-      if (!mounted) return;
-
-      await Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) =>
-              adminLogin ? const AdminDashboard() : const TouristDashboard(),
-        ),
-      );
     } on Exception catch (e) {
       if (!mounted) return;
       _showErrorSnackBar(e.toString());
