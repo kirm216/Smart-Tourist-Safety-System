@@ -52,6 +52,7 @@ class SafeZoneManagementScreen extends StatelessWidget {
             separatorBuilder: (_, _) => const SizedBox(height: 12),
             itemBuilder: (context, index) => _SafeZoneCard(
               data: zones[index].data(),
+              reference: zones[index].reference,
               onTap: () => _showEditSafeZoneDialog(context, zones[index]),
             ),
           );
@@ -599,15 +600,70 @@ String _radiusValue(Object? value) {
   return radius == 'Not provided' ? radius : '$radius m';
 }
 
-class _SafeZoneCard extends StatelessWidget {
-  const _SafeZoneCard({required this.data, required this.onTap});
+class _SafeZoneCard extends StatefulWidget {
+  const _SafeZoneCard({
+    required this.data,
+    required this.reference,
+    required this.onTap,
+  });
 
   final Map<String, dynamic> data;
+  final DocumentReference<Map<String, dynamic>> reference;
   final VoidCallback onTap;
+
+  @override
+  State<_SafeZoneCard> createState() => _SafeZoneCardState();
+}
+
+class _SafeZoneCardState extends State<_SafeZoneCard> {
+  bool _isDeleting = false;
+
+  Future<void> _confirmDelete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete Safe Zone?'),
+        content: const Text(
+          'Are you sure you want to permanently delete this safe zone?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _isDeleting = true);
+    try {
+      await widget.reference.delete();
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('Safe zone deleted successfully.')),
+        );
+    } catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Unable to delete safe zone: $error')),
+        );
+    } finally {
+      if (mounted) setState(() => _isDeleting = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final data = widget.data;
     final status = _zoneStatus(data);
     final isEnabled = status == 'Enabled';
     final statusColor = isEnabled
@@ -617,7 +673,7 @@ class _SafeZoneCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: _isDeleting ? null : widget.onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -633,10 +689,15 @@ class _SafeZoneCard extends StatelessWidget {
                       ),
                     ),
                   ),
-                  Icon(
-                    Icons.edit_outlined,
-                    size: 20,
-                    color: theme.colorScheme.onSurfaceVariant,
+                  IconButton(
+                    tooltip: 'Delete safe zone',
+                    onPressed: _isDeleting ? null : _confirmDelete,
+                    icon: _isDeleting
+                        ? const SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.delete_outline),
                   ),
                   const SizedBox(width: 8),
                   Chip(
