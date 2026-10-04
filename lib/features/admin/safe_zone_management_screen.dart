@@ -50,13 +50,33 @@ class SafeZoneManagementScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             itemCount: zones.length,
             separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, index) =>
-                _SafeZoneCard(data: zones[index].data()),
+            itemBuilder: (context, index) => _SafeZoneCard(
+              data: zones[index].data(),
+              onTap: () => _showEditSafeZoneDialog(context, zones[index]),
+            ),
           );
         },
       ),
     );
   }
+}
+
+Future<void> _showEditSafeZoneDialog(
+  BuildContext context,
+  QueryDocumentSnapshot<Map<String, dynamic>> zone,
+) async {
+  final updated = await showDialog<bool>(
+    context: context,
+    builder: (_) =>
+        _EditSafeZoneDialog(reference: zone.reference, data: zone.data()),
+  );
+  if (updated != true || !context.mounted) return;
+
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(content: Text('Safe zone updated successfully.')),
+    );
 }
 
 Future<void> _showAddSafeZoneDialog(BuildContext context) async {
@@ -263,6 +283,285 @@ class _AddSafeZoneDialogState extends State<_AddSafeZoneDialog> {
   }
 }
 
+class _EditSafeZoneDialog extends StatefulWidget {
+  const _EditSafeZoneDialog({required this.reference, required this.data});
+
+  final DocumentReference<Map<String, dynamic>> reference;
+  final Map<String, dynamic> data;
+
+  @override
+  State<_EditSafeZoneDialog> createState() => _EditSafeZoneDialogState();
+}
+
+class _EditSafeZoneDialogState extends State<_EditSafeZoneDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameController;
+  late final TextEditingController _descriptionController;
+  late final TextEditingController _typeController;
+  late final TextEditingController _latitudeController;
+  late final TextEditingController _longitudeController;
+  late final TextEditingController _radiusController;
+  late String _status;
+  bool _isSaving = false;
+  String? _saveError;
+
+  @override
+  void initState() {
+    super.initState();
+    final data = widget.data;
+    _nameController = TextEditingController(text: _stringField(data['name']));
+    _descriptionController = TextEditingController(
+      text: _stringField(data['description']),
+    );
+    _typeController = TextEditingController(text: _stringField(data['type']));
+    _latitudeController = TextEditingController(
+      text: _initialNumber(data['latitude']),
+    );
+    _longitudeController = TextEditingController(
+      text: _initialNumber(data['longitude']),
+    );
+    _radiusController = TextEditingController(
+      text: _initialNumber(data['radius']),
+    );
+    _status = _zoneStatus(data) == 'Enabled' ? 'enabled' : 'disabled';
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descriptionController.dispose();
+    _typeController.dispose();
+    _latitudeController.dispose();
+    _longitudeController.dispose();
+    _radiusController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Edit Safe Zone'),
+      content: SizedBox(
+        width: 440,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  controller: _nameController,
+                  enabled: !_isSaving,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Safe Zone Name',
+                    prefixIcon: Icon(Icons.shield_outlined),
+                  ),
+                  validator: (value) => value == null || value.trim().isEmpty
+                      ? 'Enter a safe zone name'
+                      : null,
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _descriptionController,
+                  enabled: !_isSaving,
+                  minLines: 1,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Description',
+                    prefixIcon: Icon(Icons.notes_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _typeController,
+                  enabled: !_isSaving,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: const InputDecoration(
+                    labelText: 'Type',
+                    prefixIcon: Icon(Icons.category_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _latitudeController,
+                  enabled: !_isSaving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Latitude',
+                    prefixIcon: Icon(Icons.location_on_outlined),
+                  ),
+                  validator: (value) => _validateCoordinate(
+                    value,
+                    minimum: -90,
+                    maximum: 90,
+                    label: 'Latitude',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _longitudeController,
+                  enabled: !_isSaving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                    signed: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Longitude',
+                    prefixIcon: Icon(Icons.explore_outlined),
+                  ),
+                  validator: (value) => _validateCoordinate(
+                    value,
+                    minimum: -180,
+                    maximum: 180,
+                    label: 'Longitude',
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _radiusController,
+                  enabled: !_isSaving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Radius in meters',
+                    prefixIcon: Icon(Icons.radio_button_checked_outlined),
+                  ),
+                  validator: _validateRadius,
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: _status,
+                  decoration: const InputDecoration(
+                    labelText: 'Status',
+                    prefixIcon: Icon(Icons.toggle_on_outlined),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'enabled', child: Text('Enabled')),
+                    DropdownMenuItem(
+                      value: 'disabled',
+                      child: Text('Disabled'),
+                    ),
+                  ],
+                  onChanged: _isSaving
+                      ? null
+                      : (value) {
+                          if (value != null) setState(() => _status = value);
+                        },
+                  validator: (value) => value == null
+                      ? 'Select whether this safe zone is enabled'
+                      : null,
+                ),
+                if (_saveError != null) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    _saveError!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _isSaving ? null : _save,
+          child: _isSaving
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Text('Save'),
+        ),
+      ],
+    );
+  }
+
+  String? _validateCoordinate(
+    String? value, {
+    required double minimum,
+    required double maximum,
+    required String label,
+  }) {
+    final coordinate = double.tryParse(value?.trim() ?? '');
+    if (coordinate == null || !coordinate.isFinite) {
+      return 'Enter a valid $label';
+    }
+    if (coordinate < minimum || coordinate > maximum) {
+      return '$label must be between $minimum and $maximum';
+    }
+    return null;
+  }
+
+  String? _validateRadius(String? value) {
+    final radius = double.tryParse(value?.trim() ?? '');
+    if (radius == null || !radius.isFinite) {
+      return 'Enter a valid radius';
+    }
+    if (radius <= 0) return 'Radius must be greater than zero';
+    return null;
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Please correct the highlighted fields.'),
+          ),
+        );
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _saveError = null;
+    });
+
+    try {
+      await widget.reference.update({
+        'name': _nameController.text.trim(),
+        'description': _descriptionController.text.trim(),
+        'type': _typeController.text.trim(),
+        'latitude': double.parse(_latitudeController.text.trim()),
+        'longitude': double.parse(_longitudeController.text.trim()),
+        'radius': double.parse(_radiusController.text.trim()),
+        'status': _status,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _saveError = 'Unable to update safe zone.');
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Unable to update safe zone: $error')),
+        );
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  static String _stringField(Object? value) => value is String ? value : '';
+
+  static String _initialNumber(Object? value) =>
+      value is num ? value.toString() : '';
+}
+
 String _zoneName(Map<String, dynamic> data) {
   final name = data['name'];
   return name is String && name.trim().isNotEmpty
@@ -301,9 +600,10 @@ String _radiusValue(Object? value) {
 }
 
 class _SafeZoneCard extends StatelessWidget {
-  const _SafeZoneCard({required this.data});
+  const _SafeZoneCard({required this.data, required this.onTap});
 
   final Map<String, dynamic> data;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -315,49 +615,59 @@ class _SafeZoneCard extends StatelessWidget {
         : theme.colorScheme.outline;
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _zoneName(data),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _zoneName(data),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                Chip(
-                  avatar: Icon(
-                    isEnabled ? Icons.check_circle_outline : Icons.block,
-                    size: 18,
-                    color: statusColor,
+                  Icon(
+                    Icons.edit_outlined,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
                   ),
-                  label: Text(status),
-                  side: BorderSide(color: statusColor),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            _DetailRow(
-              icon: Icons.location_on_outlined,
-              label: 'Latitude',
-              value: _numberValue(data['latitude']),
-            ),
-            _DetailRow(
-              icon: Icons.explore_outlined,
-              label: 'Longitude',
-              value: _numberValue(data['longitude']),
-            ),
-            _DetailRow(
-              icon: Icons.radio_button_checked_outlined,
-              label: 'Radius',
-              value: _radiusValue(data['radius']),
-            ),
-          ],
+                  const SizedBox(width: 8),
+                  Chip(
+                    avatar: Icon(
+                      isEnabled ? Icons.check_circle_outline : Icons.block,
+                      size: 18,
+                      color: statusColor,
+                    ),
+                    label: Text(status),
+                    side: BorderSide(color: statusColor),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              _DetailRow(
+                icon: Icons.location_on_outlined,
+                label: 'Latitude',
+                value: _numberValue(data['latitude']),
+              ),
+              _DetailRow(
+                icon: Icons.explore_outlined,
+                label: 'Longitude',
+                value: _numberValue(data['longitude']),
+              ),
+              _DetailRow(
+                icon: Icons.radio_button_checked_outlined,
+                label: 'Radius',
+                value: _radiusValue(data['radius']),
+              ),
+            ],
+          ),
         ),
       ),
     );
