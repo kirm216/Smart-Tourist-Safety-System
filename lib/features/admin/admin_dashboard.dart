@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
+import 'danger_zone_management_screen.dart';
 import 'geofence_events_screen.dart';
 import 'safe_zone_management_screen.dart';
 import 'sos_management_screen.dart';
@@ -89,6 +90,12 @@ class AdminDashboard extends StatelessWidget {
                 label: 'Manage Safe Zones',
                 onPressed: () =>
                     _open(context, const SafeZoneManagementScreen()),
+              ),
+              _ActionButton(
+                icon: Icons.warning_amber_outlined,
+                label: 'Manage Danger Zones',
+                onPressed: () =>
+                    _open(context, const DangerZoneManagementScreen()),
               ),
             ],
           ),
