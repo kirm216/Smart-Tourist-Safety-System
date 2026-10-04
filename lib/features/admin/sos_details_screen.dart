@@ -252,7 +252,9 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isResolved = status == 'Resolved';
-    final color = isResolved ? Colors.green : Theme.of(context).colorScheme.error;
+    final color = isResolved
+        ? Colors.green
+        : Theme.of(context).colorScheme.error;
     return Chip(
       avatar: Icon(
         isResolved ? Icons.check_circle_outline : Icons.crisis_alert_outlined,

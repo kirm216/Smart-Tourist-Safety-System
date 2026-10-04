@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
 import 'geofence_events_screen.dart';
-import 'safezones_management_screen.dart';
+import 'safe_zone_management_screen.dart';
 import 'sos_management_screen.dart';
 import 'tourists_screen.dart';
 
