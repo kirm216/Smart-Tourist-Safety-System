@@ -1,6 +1,8 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import 'sos_details_screen.dart';
+
 class SosManagementScreen extends StatelessWidget {
   const SosManagementScreen({super.key});
 
@@ -41,8 +43,14 @@ class SosManagementScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             itemCount: alerts.length,
             separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, index) =>
-                _AlertCard(data: alerts[index].data()),
+            itemBuilder: (context, index) => _AlertCard(
+              alert: alerts[index],
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SosDetailsScreen(alert: alerts[index]),
+                ),
+              ),
+            ),
           );
         },
       ),
@@ -51,9 +59,12 @@ class SosManagementScreen extends StatelessWidget {
 }
 
 class _AlertCard extends StatelessWidget {
-  const _AlertCard({required this.data});
+  const _AlertCard({required this.alert, required this.onTap});
 
-  final Map<String, dynamic> data;
+  final QueryDocumentSnapshot<Map<String, dynamic>> alert;
+  final VoidCallback onTap;
+
+  Map<String, dynamic> get data => alert.data();
 
   String _text(String key, {String fallback = 'Not provided'}) {
     final value = data[key];
@@ -65,6 +76,23 @@ class _AlertCard extends StatelessWidget {
     final value = data[key];
     if (value is num) return value.toString();
     return 'Not provided';
+  }
+
+  String _statusLabel() {
+    final status = _text('status', fallback: 'Unknown');
+    if (status.toLowerCase() == 'resolved' || data['resolved'] == true) {
+      return 'Resolved';
+    }
+    switch (status.toLowerCase()) {
+      case 'active':
+        return 'Active';
+      case 'acknowledged':
+        return 'Acknowledged';
+      case 'in progress':
+        return 'In Progress';
+      default:
+        return status;
+    }
   }
 
   String _formattedTimestamp() {
@@ -84,62 +112,65 @@ class _AlertCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final status = _text('status', fallback: 'unknown').toLowerCase();
-    final isResolved = status == 'resolved' || data['resolved'] == true;
-    final statusLabel = isResolved ? 'Resolved' : 'Active';
+    final statusLabel = _statusLabel();
+    final isResolved = statusLabel == 'Resolved';
     final statusColor = isResolved
         ? theme.colorScheme.primary
         : theme.colorScheme.error;
 
     return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _text('fullName', fallback: 'Unnamed tourist'),
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.bold,
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      _text('fullName', fallback: 'Unnamed tourist'),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-                Chip(
-                  label: Text(statusLabel),
-                  avatar: Icon(
-                    isResolved ? Icons.check_circle_outline : Icons.warning,
-                    size: 18,
-                    color: statusColor,
+                  Chip(
+                    label: Text(statusLabel),
+                    avatar: Icon(
+                      isResolved ? Icons.check_circle_outline : Icons.warning,
+                      size: 18,
+                      color: statusColor,
+                    ),
+                    side: BorderSide(color: statusColor),
                   ),
-                  side: BorderSide(color: statusColor),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            _DetailRow(
-              icon: Icons.email_outlined,
-              label: 'Email',
-              value: _text('email'),
-            ),
-            _DetailRow(
-              icon: Icons.schedule_outlined,
-              label: 'Timestamp',
-              value: _formattedTimestamp(),
-            ),
-            _DetailRow(
-              icon: Icons.location_on_outlined,
-              label: 'Latitude',
-              value: _number('latitude'),
-            ),
-            _DetailRow(
-              icon: Icons.explore_outlined,
-              label: 'Longitude',
-              value: _number('longitude'),
-            ),
-          ],
+                ],
+              ),
+              const SizedBox(height: 12),
+              _DetailRow(
+                icon: Icons.email_outlined,
+                label: 'Email',
+                value: _text('email'),
+              ),
+              _DetailRow(
+                icon: Icons.schedule_outlined,
+                label: 'Timestamp',
+                value: _formattedTimestamp(),
+              ),
+              _DetailRow(
+                icon: Icons.location_on_outlined,
+                label: 'Latitude',
+                value: _number('latitude'),
+              ),
+              _DetailRow(
+                icon: Icons.explore_outlined,
+                label: 'Longitude',
+                value: _number('longitude'),
+              ),
+            ],
+          ),
         ),
       ),
     );
