@@ -1,12 +1,39 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
-class SafeZoneManagementScreen extends StatelessWidget {
+class SafeZoneManagementScreen extends StatefulWidget {
   const SafeZoneManagementScreen({super.key});
+
+  @override
+  State<SafeZoneManagementScreen> createState() =>
+      _SafeZoneManagementScreenState();
+}
+
+enum _ZoneSort { nameAz, nameZa, newest, oldest }
+
+class _SafeZoneManagementScreenState extends State<SafeZoneManagementScreen> {
+  static const _statusFilters = ['All', 'Enabled', 'Disabled'];
 
   static final _safeZonesStream = FirebaseFirestore.instance
       .collection('safe_zones')
       .snapshots();
+
+  late final TextEditingController _searchController;
+  String _searchQuery = '';
+  String _selectedFilter = 'All';
+  _ZoneSort _sort = _ZoneSort.nameAz;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,34 +59,297 @@ class SafeZoneManagementScreen extends StatelessWidget {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final zones = [...?snapshot.data?.docs]
-            ..sort((left, right) {
-              final leftName = _zoneName(left.data()).toLowerCase();
-              final rightName = _zoneName(right.data()).toLowerCase();
-              return leftName.compareTo(rightName);
-            });
+          final allZones = snapshot.data?.docs ?? [];
+          final enabledCount = allZones
+              .where((zone) => _zoneStatus(zone.data()) == 'Enabled')
+              .length;
+          final disabledCount = allZones.length - enabledCount;
+          final query = _searchQuery.trim().toLowerCase();
+          final zones = allZones.where((zone) {
+            final data = zone.data();
+            final status = _zoneStatus(data);
+            final name = _zoneName(data).toLowerCase();
+            final type = (data['type'] ?? '').toString().toLowerCase();
+            final matchesSearch =
+                query.isEmpty || name.contains(query) || type.contains(query);
+            final matchesStatus =
+                _selectedFilter == 'All' || status == _selectedFilter;
+            return matchesSearch && matchesStatus;
+          }).toList();
 
-          if (zones.isEmpty) {
-            return const _MessageState(
-              icon: Icons.shield_outlined,
-              message: 'No safe zones found.',
-            );
-          }
+          zones.sort(_compareZones);
 
-          return ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-            itemCount: zones.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 12),
-            itemBuilder: (context, index) => _SafeZoneCard(
-              data: zones[index].data(),
-              reference: zones[index].reference,
-              onTap: () => _showEditSafeZoneDialog(context, zones[index]),
-            ),
+          return Column(
+            children: [
+              _SafeZoneControls(
+                controller: _searchController,
+                statusFilters: _statusFilters,
+                selectedFilter: _selectedFilter,
+                sort: _sort,
+                totalCount: allZones.length,
+                enabledCount: enabledCount,
+                disabledCount: disabledCount,
+                onSearchChanged: (value) =>
+                    setState(() => _searchQuery = value),
+                onFilterChanged: (value) =>
+                    setState(() => _selectedFilter = value),
+                onSortChanged: (value) => setState(() => _sort = value),
+              ),
+              Expanded(
+                child: zones.isEmpty
+                    ? _MessageState(
+                        icon: Icons.shield_outlined,
+                        message: allZones.isEmpty
+                            ? 'No safe zones found.'
+                            : 'No safe zones match these filters.',
+                      )
+                    : ListView.separated(
+                        padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
+                        itemCount: zones.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 12),
+                        itemBuilder: (context, index) => _SafeZoneCard(
+                          data: zones[index].data(),
+                          reference: zones[index].reference,
+                          onTap: () =>
+                              _showEditSafeZoneDialog(context, zones[index]),
+                        ),
+                      ),
+              ),
+            ],
           );
         },
       ),
     );
   }
+
+  int _compareZones(
+    QueryDocumentSnapshot<Map<String, dynamic>> left,
+    QueryDocumentSnapshot<Map<String, dynamic>> right,
+  ) {
+    final nameComparison = _zoneName(
+      left.data(),
+    ).toLowerCase().compareTo(_zoneName(right.data()).toLowerCase());
+    switch (_sort) {
+      case _ZoneSort.nameAz:
+        return nameComparison;
+      case _ZoneSort.nameZa:
+        return -nameComparison;
+      case _ZoneSort.newest:
+        final timeComparison = _compareZoneDates(
+          _zoneCreatedAt(left.data()),
+          _zoneCreatedAt(right.data()),
+          newestFirst: true,
+        );
+        return timeComparison == 0 ? nameComparison : timeComparison;
+      case _ZoneSort.oldest:
+        final timeComparison = _compareZoneDates(
+          _zoneCreatedAt(left.data()),
+          _zoneCreatedAt(right.data()),
+          newestFirst: false,
+        );
+        return timeComparison == 0 ? nameComparison : timeComparison;
+    }
+  }
+}
+
+class _SafeZoneControls extends StatelessWidget {
+  const _SafeZoneControls({
+    required this.controller,
+    required this.statusFilters,
+    required this.selectedFilter,
+    required this.sort,
+    required this.totalCount,
+    required this.enabledCount,
+    required this.disabledCount,
+    required this.onSearchChanged,
+    required this.onFilterChanged,
+    required this.onSortChanged,
+  });
+
+  final TextEditingController controller;
+  final List<String> statusFilters;
+  final String selectedFilter;
+  final _ZoneSort sort;
+  final int totalCount;
+  final int enabledCount;
+  final int disabledCount;
+  final ValueChanged<String> onSearchChanged;
+  final ValueChanged<String> onFilterChanged;
+  final ValueChanged<_ZoneSort> onSortChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: controller,
+            onChanged: onSearchChanged,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.search),
+              hintText: 'Search by name or type',
+              suffixIcon: controller.text.isEmpty
+                  ? null
+                  : IconButton(
+                      tooltip: 'Clear search',
+                      onPressed: () {
+                        controller.clear();
+                        onSearchChanged('');
+                      },
+                      icon: const Icon(Icons.close),
+                    ),
+              border: const OutlineInputBorder(),
+              isDense: true,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            children: statusFilters
+                .map(
+                  (filter) => ChoiceChip(
+                    label: Text(filter),
+                    selected: selectedFilter == filter,
+                    onSelected: (_) => onFilterChanged(filter),
+                  ),
+                )
+                .toList(),
+          ),
+          Row(
+            children: [
+              Text('Sort', style: theme.textTheme.labelLarge),
+              const SizedBox(width: 12),
+              Expanded(
+                child: DropdownButtonFormField<_ZoneSort>(
+                  initialValue: sort,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
+                    isDense: true,
+                  ),
+                  items: const [
+                    DropdownMenuItem(
+                      value: _ZoneSort.nameAz,
+                      child: Text('Name (A–Z)'),
+                    ),
+                    DropdownMenuItem(
+                      value: _ZoneSort.nameZa,
+                      child: Text('Name (Z–A)'),
+                    ),
+                    DropdownMenuItem(
+                      value: _ZoneSort.newest,
+                      child: Text('Newest'),
+                    ),
+                    DropdownMenuItem(
+                      value: _ZoneSort.oldest,
+                      child: Text('Oldest'),
+                    ),
+                  ],
+                  onChanged: (value) {
+                    if (value != null) onSortChanged(value);
+                  },
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _ZoneStatTile(
+                  label: 'Total Safe Zones',
+                  count: totalCount,
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ZoneStatTile(
+                  label: 'Enabled Safe Zones',
+                  count: enabledCount,
+                  color: theme.colorScheme.tertiary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _ZoneStatTile(
+                  label: 'Disabled Safe Zones',
+                  count: disabledCount,
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ZoneStatTile extends StatelessWidget {
+  const _ZoneStatTile({
+    required this.label,
+    required this.count,
+    required this.color,
+  });
+
+  final String label;
+  final int count;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+        child: Column(
+          children: [
+            Text(
+              '$count',
+              style: theme.textTheme.titleLarge?.copyWith(
+                color: color,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.labelSmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+int _compareZoneDates(
+  DateTime? left,
+  DateTime? right, {
+  required bool newestFirst,
+}) {
+  if (left == null && right == null) return 0;
+  if (left == null) return 1;
+  if (right == null) return -1;
+  return newestFirst ? right.compareTo(left) : left.compareTo(right);
+}
+
+DateTime? _zoneCreatedAt(Map<String, dynamic> data) {
+  final value = data['createdAt'];
+  if (value is Timestamp) return value.toDate();
+  if (value is DateTime) return value;
+  return null;
 }
 
 Future<void> _showEditSafeZoneDialog(
@@ -617,8 +907,40 @@ class _SafeZoneCard extends StatefulWidget {
 
 class _SafeZoneCardState extends State<_SafeZoneCard> {
   bool _isDeleting = false;
+  bool _isUpdatingStatus = false;
+
+  Future<void> _toggleStatus() async {
+    if (_isDeleting || _isUpdatingStatus) return;
+
+    final nextStatus = _zoneStatus(widget.data) == 'Enabled'
+        ? 'disabled'
+        : 'enabled';
+    final nextStatusLabel = nextStatus == 'enabled' ? 'Enabled' : 'Disabled';
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _isUpdatingStatus = true);
+    try {
+      await widget.reference.update({
+        'status': nextStatus,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Safe zone set to $nextStatusLabel.')),
+        );
+    } catch (error) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('Unable to update safe zone status: $error')),
+        );
+    } finally {
+      if (mounted) setState(() => _isUpdatingStatus = false);
+    }
+  }
 
   Future<void> _confirmDelete() async {
+    if (_isDeleting || _isUpdatingStatus) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
@@ -669,11 +991,12 @@ class _SafeZoneCardState extends State<_SafeZoneCard> {
     final statusColor = isEnabled
         ? theme.colorScheme.primary
         : theme.colorScheme.outline;
+    final isBusy = _isDeleting || _isUpdatingStatus;
 
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: _isDeleting ? null : widget.onTap,
+        onTap: isBusy ? null : widget.onTap,
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
@@ -691,7 +1014,7 @@ class _SafeZoneCardState extends State<_SafeZoneCard> {
                   ),
                   IconButton(
                     tooltip: 'Delete safe zone',
-                    onPressed: _isDeleting ? null : _confirmDelete,
+                    onPressed: isBusy ? null : _confirmDelete,
                     icon: _isDeleting
                         ? const SizedBox.square(
                             dimension: 20,
@@ -700,14 +1023,22 @@ class _SafeZoneCardState extends State<_SafeZoneCard> {
                         : const Icon(Icons.delete_outline),
                   ),
                   const SizedBox(width: 8),
-                  Chip(
-                    avatar: Icon(
-                      isEnabled ? Icons.check_circle_outline : Icons.block,
-                      size: 18,
-                      color: statusColor,
-                    ),
+                  ActionChip(
+                    avatar: _isUpdatingStatus
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            isEnabled
+                                ? Icons.check_circle_outline
+                                : Icons.block,
+                            size: 18,
+                            color: statusColor,
+                          ),
                     label: Text(status),
                     side: BorderSide(color: statusColor),
+                    onPressed: isBusy ? null : _toggleStatus,
                   ),
                 ],
               ),
