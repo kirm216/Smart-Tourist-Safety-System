@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../auth/auth_service.dart';
 import 'danger_zone_management_screen.dart';
 import 'geofence_events_screen.dart';
+import 'live_tourist_monitoring_screen.dart';
 import 'safe_zone_management_screen.dart';
 import 'sos_management_screen.dart';
 import 'tourists_screen.dart';
@@ -74,6 +75,12 @@ class AdminDashboard extends StatelessWidget {
                 icon: Icons.people_alt_outlined,
                 label: 'Manage Tourists',
                 onPressed: () => _open(context, const TouristsScreen()),
+              ),
+              _ActionButton(
+                icon: Icons.map_outlined,
+                label: 'Live Tourist Monitoring',
+                onPressed: () =>
+                    _open(context, const LiveTouristMonitoringScreen()),
               ),
               _ActionButton(
                 icon: Icons.crisis_alert_outlined,
