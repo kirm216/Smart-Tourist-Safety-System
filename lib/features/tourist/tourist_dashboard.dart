@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
@@ -5,9 +7,37 @@ import 'package:geolocator/geolocator.dart';
 import '../auth/auth_service.dart';
 import '../profile/profile_screen.dart';
 import 'maps_screen.dart';
+import 'tourist_location_sync_service.dart';
 
-class TouristDashboard extends StatelessWidget {
+class TouristDashboard extends StatefulWidget {
   const TouristDashboard({super.key});
+
+  @override
+  State<TouristDashboard> createState() => _TouristDashboardState();
+}
+
+class _TouristDashboardState extends State<TouristDashboard> {
+  final _locationSyncService = TouristLocationSyncService();
+
+  @override
+  void initState() {
+    super.initState();
+    final user = AuthService().currentUser;
+    if (user != null) {
+      debugPrint('Tourist Dashboard opened for user ${user.uid}.');
+      unawaited(_locationSyncService.startTracking(user.uid));
+    } else {
+      debugPrint(
+        'Tourist location tracking not started: no authenticated user.',
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_locationSyncService.stopTracking(markOffline: true));
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -310,9 +340,12 @@ class TouristDashboard extends StatelessWidget {
   }
 
   void _openMaps(BuildContext context) {
-    Navigator.of(
-      context,
-    ).push(MaterialPageRoute<void>(builder: (context) => const MapsScreen()));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) =>
+            MapsScreen(locationSyncService: _locationSyncService),
+      ),
+    );
   }
 
   void _openProfile(BuildContext context) {
@@ -346,6 +379,7 @@ class TouristDashboard extends StatelessWidget {
     );
 
     if (shouldSignOut != true) return;
+    await _locationSyncService.stopTracking(markOffline: true);
     await authService.logout();
   }
 }

@@ -338,7 +338,7 @@ String _zoneType(Map<String, dynamic> data) {
     case 'danger':
       return 'Danger';
     default:
-      return type.isEmpty ? 'Unknown' : type;
+      return type.isEmpty ? 'Safe' : type;
   }
 }
 

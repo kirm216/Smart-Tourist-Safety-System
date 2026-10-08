@@ -7,9 +7,12 @@ import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../auth/auth_service.dart';
+import 'tourist_location_sync_service.dart';
 
 class MapsScreen extends StatefulWidget {
-  const MapsScreen({super.key});
+  const MapsScreen({super.key, required this.locationSyncService});
+
+  final TouristLocationSyncService locationSyncService;
 
   @override
   State<MapsScreen> createState() => _MapsScreenState();
@@ -135,6 +138,7 @@ class _MapsScreenState extends State<MapsScreen> {
   }
 
   void _checkSafeZones(Position position) {
+    SafeZone? currentSafeZone;
     for (final zone in _safeZones) {
       final isInside =
           Geolocator.distanceBetween(
@@ -144,6 +148,8 @@ class _MapsScreenState extends State<MapsScreen> {
             zone.longitude,
           ) <=
           zone.radius;
+
+      if (isInside) currentSafeZone ??= zone;
 
       final wasInside = _zoneMembership[zone.id] ?? false;
       if (isInside && !wasInside) {
@@ -156,6 +162,11 @@ class _MapsScreenState extends State<MapsScreen> {
         _showGeoFenceSnackBar('You left ${zone.name}');
       }
     }
+
+    widget.locationSyncService.updateSafetyState(
+      currentSafeZone: currentSafeZone?.name,
+      currentSafetyStatus: currentSafeZone == null ? 'unknown' : 'safe',
+    );
   }
 
   Future<void> _saveGeoFenceAlert(
