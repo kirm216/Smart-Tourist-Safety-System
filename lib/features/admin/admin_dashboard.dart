@@ -6,6 +6,7 @@ import 'danger_zone_management_screen.dart';
 import 'geofence_events_screen.dart';
 import 'live_tourist_monitoring_screen.dart';
 import 'admin_notifications_screen.dart';
+import 'reports_analytics_screen.dart';
 import 'safe_zone_management_screen.dart';
 import 'sos_details_screen.dart';
 import 'sos_management_screen.dart';
@@ -413,6 +414,12 @@ class _DashboardContent extends StatelessWidget {
                     label: 'Admin Notifications',
                     onPressed: () =>
                         onOpen(context, const AdminNotificationsScreen()),
+                  ),
+                  _ActionButton(
+                    icon: Icons.analytics_outlined,
+                    label: 'Reports & Analytics',
+                    onPressed: () =>
+                        onOpen(context, const ReportsAnalyticsScreen()),
                   ),
                   _ActionButton(
                     icon: Icons.crisis_alert_outlined,
