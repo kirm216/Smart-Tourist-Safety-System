@@ -96,25 +96,6 @@ class _TouristDashboardState extends State<TouristDashboard> {
                                   ).colorScheme.onSurfaceVariant,
                                 ),
                           ),
-                          const SizedBox(height: 20),
-                          Wrap(
-                            runSpacing: 16,
-                            spacing: 16,
-                            children: [
-                              FilledButton.tonalIcon(
-                                icon: const Icon(
-                                  Icons.notifications_active_outlined,
-                                ),
-                                label: const Text('Overview'),
-                                onPressed: () {},
-                              ),
-                              FilledButton.tonalIcon(
-                                icon: const Icon(Icons.location_on_outlined),
-                                label: const Text('Travel safety'),
-                                onPressed: () {},
-                              ),
-                            ],
-                          ),
                         ],
                       ),
                     ),
@@ -145,17 +126,6 @@ class _TouristDashboardState extends State<TouristDashboard> {
                               context,
                             ).colorScheme.primaryContainer,
                             onTap: () => _openMaps(context),
-                            width: cardWidth,
-                          ),
-                          _ActionCard(
-                            title: 'Safe Zones',
-                            subtitle: 'Secure locations',
-                            icon: Icons.shield_outlined,
-                            color: Theme.of(
-                              context,
-                            ).colorScheme.secondaryContainer,
-                            onTap: () =>
-                                _navigateToSection(context, 'Safe Zones'),
                             width: cardWidth,
                           ),
                           _ActionCard(
@@ -218,17 +188,6 @@ class _TouristDashboardState extends State<TouristDashboard> {
         ),
       ),
     );
-  }
-
-  void _navigateToSection(BuildContext context, String section) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text('Navigation placeholder: $section screen coming soon.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
   }
 
   Future<void> _confirmAndSendSOS(BuildContext context) async {
