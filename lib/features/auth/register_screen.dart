@@ -45,7 +45,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       if (!mounted) return;
-      Navigator.pop(context);
+      Navigator.of(context).popUntil((route) => route.isFirst);
     } on Exception catch (e) {
       if (!mounted) return;
       _showErrorSnackBar(e.toString());

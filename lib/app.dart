@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import 'features/admin/admin_dashboard.dart';
 import 'features/admin/admin_service.dart';
+import 'features/auth/email_verification_screen.dart';
 import 'features/auth/auth_service.dart';
 import 'features/auth/login_screen.dart';
 import 'features/tourist/tourist_dashboard.dart';
@@ -27,7 +28,7 @@ class AuthGate extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<User?>(
-      stream: AuthService().authStateChanges,
+      stream: AuthService().userChanges,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
@@ -71,9 +72,13 @@ class AuthGate extends StatelessWidget {
               );
             }
 
-            return adminSnapshot.data == true
-                ? const AdminDashboard()
-                : const TouristDashboard();
+            if (adminSnapshot.data == true) {
+              return const AdminDashboard();
+            }
+
+            return user.emailVerified
+                ? const TouristDashboard()
+                : const EmailVerificationScreen();
           },
         );
       },

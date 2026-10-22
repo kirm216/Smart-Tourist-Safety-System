@@ -16,9 +16,28 @@ class AuthService {
         password: password,
       );
 
-      await credential.user?.updateDisplayName(name.trim());
+      final user = credential.user;
+      if (user == null) {
+        throw Exception('Unable to identify the newly created user.');
+      }
+
+      await user.updateDisplayName(name.trim());
+      await user.sendEmailVerification();
 
       return credential;
+    } on FirebaseAuthException catch (e) {
+      throw Exception(friendlyAuthErrorMessage(e));
+    }
+  }
+
+  Future<void> resendVerificationEmail() async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) {
+        throw Exception('No signed-in user is available for verification.');
+      }
+
+      await user.sendEmailVerification();
     } on FirebaseAuthException catch (e) {
       throw Exception(friendlyAuthErrorMessage(e));
     }
@@ -43,6 +62,8 @@ class AuthService {
   }
 
   Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  Stream<User?> get userChanges => _auth.userChanges();
 
   User? get currentUser => _auth.currentUser;
 
