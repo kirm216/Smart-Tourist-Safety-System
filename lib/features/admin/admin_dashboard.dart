@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 import '../auth/auth_service.dart';
+import 'admin_feedback_management_screen.dart';
 import 'danger_zone_management_screen.dart';
 import 'geofence_events_screen.dart';
 import 'live_tourist_monitoring_screen.dart';
@@ -444,6 +445,12 @@ class _DashboardContent extends StatelessWidget {
                     label: 'Manage Danger Zones',
                     onPressed: () =>
                         onOpen(context, const DangerZoneManagementScreen()),
+                  ),
+                  _ActionButton(
+                    icon: Icons.feedback_outlined,
+                    label: 'Feedback Management',
+                    onPressed: () =>
+                        onOpen(context, const AdminFeedbackManagementScreen()),
                   ),
                 ],
               ),
