@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:speech_to_text/speech_to_text.dart';
+import 'package:speech_to_text/speech_recognition_error.dart';
+import 'package:speech_to_text/speech_recognition_result.dart';
 
 import '../auth/auth_service.dart';
 import '../profile/profile_screen.dart';
@@ -18,10 +21,18 @@ class TouristDashboard extends StatefulWidget {
 
 class _TouristDashboardState extends State<TouristDashboard> {
   final _locationSyncService = TouristLocationSyncService();
+  final _speechToText = SpeechToText();
+  late final Future<bool> _speechInitialization;
+  bool _speechAvailable = false;
+  bool _isListening = false;
+  bool _isStartingVoiceSOS = false;
+  bool _voiceSosTriggered = false;
+  String? _speechErrorMessage;
 
   @override
   void initState() {
     super.initState();
+    _speechInitialization = _initializeSpeechRecognition();
     final user = AuthService().currentUser;
     if (user != null) {
       debugPrint('Tourist Dashboard opened for user ${user.uid}.');
@@ -35,8 +46,153 @@ class _TouristDashboardState extends State<TouristDashboard> {
 
   @override
   void dispose() {
+    unawaited(_cancelSpeechRecognition());
     unawaited(_locationSyncService.stopTracking(markOffline: true));
     super.dispose();
+  }
+
+  Future<bool> _initializeSpeechRecognition() async {
+    try {
+      final available = await _speechToText.initialize(
+        onStatus: _onSpeechStatus,
+        onError: _onSpeechError,
+      );
+      if (mounted) {
+        setState(() {
+          _speechAvailable = available;
+        });
+      }
+      return available;
+    } catch (error) {
+      debugPrint('Voice SOS speech recognition initialization failed: $error');
+      if (mounted) {
+        setState(() {
+          _speechErrorMessage =
+              'Voice SOS is unavailable. Please check microphone permission and try again.';
+        });
+      }
+      return false;
+    }
+  }
+
+  void _onSpeechStatus(String status) {
+    if (!mounted) return;
+    setState(() {
+      _isListening = status == 'listening';
+      if (_isListening || status == 'notListening' || status == 'done') {
+        _isStartingVoiceSOS = false;
+      }
+    });
+  }
+
+  void _onSpeechError(SpeechRecognitionError error) {
+    final wasActive = _isListening || _isStartingVoiceSOS;
+    final permissionDenied = error.errorMsg.toLowerCase().contains(
+      'permission',
+    );
+    final message = permissionDenied
+        ? 'Microphone permission was denied. Please allow microphone access to use Voice SOS.'
+        : 'Voice SOS is unavailable right now. Please try again.';
+    debugPrint('Voice SOS speech recognition error: ${error.errorMsg}');
+    if (!mounted) return;
+    setState(() {
+      _speechErrorMessage = message;
+      _isListening = false;
+      _isStartingVoiceSOS = false;
+    });
+    if (wasActive) _showSnackBar(context, message);
+  }
+
+  Future<void> _startVoiceSOS() async {
+    if (_isListening || _isStartingVoiceSOS || _speechToText.isListening) {
+      return;
+    }
+
+    setState(() {
+      _isStartingVoiceSOS = true;
+      _speechErrorMessage = null;
+    });
+
+    try {
+      _speechAvailable = await _speechInitialization;
+      if (!mounted) return;
+      if (!_speechAvailable) {
+        setState(() {
+          _isStartingVoiceSOS = false;
+        });
+        _showSnackBar(
+          context,
+          _speechErrorMessage ??
+              'Voice SOS is unavailable. Please check microphone permission and try again.',
+        );
+        return;
+      }
+
+      _voiceSosTriggered = false;
+      setState(() {
+        _isListening = true;
+      });
+      await _speechToText.listen(
+        onResult: _onSpeechResult,
+        listenOptions: SpeechListenOptions(
+          listenFor: const Duration(seconds: 10),
+          pauseFor: const Duration(seconds: 3),
+        ),
+      );
+    } catch (error) {
+      debugPrint('Unable to start Voice SOS speech recognition: $error');
+      if (!mounted) return;
+      final message =
+          'Voice SOS could not start. Please check microphone permission and try again.';
+      setState(() {
+        _isListening = false;
+        _isStartingVoiceSOS = false;
+        _speechErrorMessage = message;
+      });
+      _showSnackBar(context, message);
+    }
+  }
+
+  void _onSpeechResult(SpeechRecognitionResult result) {
+    if (_voiceSosTriggered ||
+        !RegExp(
+          r'\b(?:sos|help|emergency)\b',
+          caseSensitive: false,
+        ).hasMatch(result.recognizedWords)) {
+      return;
+    }
+
+    _voiceSosTriggered = true;
+    if (mounted) {
+      setState(() {
+        _isListening = false;
+        _isStartingVoiceSOS = false;
+      });
+    }
+    unawaited(_confirmVoiceSOS());
+  }
+
+  Future<void> _confirmVoiceSOS() async {
+    try {
+      await _speechToText.cancel();
+    } catch (error) {
+      debugPrint('Unable to cancel Voice SOS listening: $error');
+      if (mounted) {
+        _showSnackBar(
+          context,
+          'Voice listening could not be stopped automatically.',
+        );
+      }
+    }
+    if (mounted) await _confirmAndSendSOS(context);
+  }
+
+  Future<void> _cancelSpeechRecognition() async {
+    try {
+      await _speechToText.cancel();
+    } catch (error) {
+      debugPrint('Unable to stop Voice SOS during dashboard disposal: $error');
+    }
   }
 
   @override
@@ -167,6 +323,27 @@ class _TouristDashboardState extends State<TouristDashboard> {
                     ),
                   ),
                   const SizedBox(height: 20),
+                  SizedBox(
+                    height: 60,
+                    child: OutlinedButton.icon(
+                      icon: Icon(
+                        _isListening ? Icons.mic : Icons.mic_none_outlined,
+                      ),
+                      label: Text(_isListening ? 'Listening...' : 'Voice SOS'),
+                      onPressed: _isListening || _isStartingVoiceSOS
+                          ? null
+                          : _startVoiceSOS,
+                    ),
+                  ),
+                  if (_isListening) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      'Say "SOS", "help", or "emergency".',
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                  const SizedBox(height: 12),
                   SizedBox(
                     height: 60,
                     child: FilledButton(
