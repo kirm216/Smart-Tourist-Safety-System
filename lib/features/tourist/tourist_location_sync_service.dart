@@ -85,11 +85,12 @@ class TouristLocationSyncService {
 
   void updateSafetyState({
     required String? currentSafeZone,
+    required String? currentDangerZone,
     required String currentSafetyStatus,
   }) {
     final fields = <String, Object?>{
       'currentSafeZone': currentSafeZone,
-      'currentDangerZone': null,
+      'currentDangerZone': currentDangerZone,
       'currentSafetyStatus': currentSafetyStatus,
     };
     if (mapEquals(_safetyFields, fields)) return;

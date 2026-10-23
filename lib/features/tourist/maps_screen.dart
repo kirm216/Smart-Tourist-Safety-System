@@ -28,13 +28,17 @@ class _MapsScreenState extends State<MapsScreen> {
   bool _permissionDenied = false;
   String? _errorMessage;
   String? _safeZoneError;
+  String? _dangerZoneError;
   Position? _position;
   final List<SafeZone> _safeZones = [];
+  final List<DangerZone> _dangerZones = [];
+  bool _dangerZonesAvailable = false;
 
   @override
   void initState() {
     super.initState();
     _loadSafeZones();
+    _loadDangerZones();
     _initializeLocation();
   }
 
@@ -89,7 +93,7 @@ class _MapsScreenState extends State<MapsScreen> {
               _position = position;
             });
 
-            _checkSafeZones(position);
+            _checkSafetyZones(position);
           },
           onError: (error) {
             if (!mounted) return;
@@ -127,7 +131,7 @@ class _MapsScreenState extends State<MapsScreen> {
       });
 
       if (_position != null) {
-        _checkSafeZones(_position!);
+        _checkSafetyZones(_position!);
       }
     } catch (error) {
       if (!mounted) return;
@@ -137,7 +141,55 @@ class _MapsScreenState extends State<MapsScreen> {
     }
   }
 
-  void _checkSafeZones(Position position) {
+  Future<void> _loadDangerZones() async {
+    try {
+      final snapshot = await _firestore.collection('danger_zones').get();
+      final zones = snapshot.docs
+          .where((doc) => doc.data()['status'] == 'enabled')
+          .map((doc) {
+            final data = doc.data();
+            return DangerZone(
+              name: (data['name'] as String?)?.trim().isNotEmpty == true
+                  ? (data['name'] as String).trim()
+                  : 'Unnamed zone',
+              latitude: (data['latitude'] as num?)?.toDouble() ?? 0,
+              longitude: (data['longitude'] as num?)?.toDouble() ?? 0,
+              radius: (data['radius'] as num?)?.toDouble() ?? 0,
+            );
+          })
+          .where(
+            (zone) =>
+                zone.latitude.isFinite &&
+                zone.longitude.isFinite &&
+                zone.radius.isFinite &&
+                zone.latitude >= -90 &&
+                zone.latitude <= 90 &&
+                zone.longitude >= -180 &&
+                zone.longitude <= 180 &&
+                zone.radius > 0,
+          )
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _dangerZones
+          ..clear()
+          ..addAll(zones);
+        _dangerZonesAvailable = true;
+        _dangerZoneError = null;
+      });
+      if (_position != null) _checkSafetyZones(_position!);
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _dangerZonesAvailable = false;
+        _dangerZoneError = error.toString();
+      });
+      if (_position != null) _checkSafetyZones(_position!);
+    }
+  }
+
+  void _checkSafetyZones(Position position) {
     SafeZone? currentSafeZone;
     for (final zone in _safeZones) {
       final isInside =
@@ -163,9 +215,35 @@ class _MapsScreenState extends State<MapsScreen> {
       }
     }
 
+    DangerZone? currentDangerZone;
+    if (_dangerZonesAvailable) {
+      for (final zone in _dangerZones) {
+        final isInside =
+            Geolocator.distanceBetween(
+              position.latitude,
+              position.longitude,
+              zone.latitude,
+              zone.longitude,
+            ) <=
+            zone.radius;
+        if (isInside) {
+          currentDangerZone = zone;
+          break;
+        }
+      }
+    }
+
+    final safetyStatus = !_dangerZonesAvailable
+        ? 'unknown'
+        : currentDangerZone != null
+        ? 'danger'
+        : currentSafeZone != null
+        ? 'safe'
+        : 'unknown';
     widget.locationSyncService.updateSafetyState(
-      currentSafeZone: currentSafeZone?.name,
-      currentSafetyStatus: currentSafeZone == null ? 'unknown' : 'safe',
+      currentSafeZone: safetyStatus == 'safe' ? currentSafeZone?.name : null,
+      currentDangerZone: currentDangerZone?.name,
+      currentSafetyStatus: safetyStatus,
     );
   }
 
@@ -241,13 +319,18 @@ class _MapsScreenState extends State<MapsScreen> {
 
     return Column(
       children: [
-        if (_safeZoneError != null)
+        if (_safeZoneError != null || _dangerZoneError != null)
           Container(
             width: double.infinity,
             color: Theme.of(context).colorScheme.errorContainer,
             padding: const EdgeInsets.all(12),
             child: Text(
-              'Unable to load safe zones: $_safeZoneError',
+              [
+                if (_safeZoneError != null)
+                  'Unable to load safe zones: $_safeZoneError',
+                if (_dangerZoneError != null)
+                  'Unable to load danger zones: $_dangerZoneError',
+              ].join('\n'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: Theme.of(context).colorScheme.onErrorContainer,
               ),
@@ -274,6 +357,20 @@ class _MapsScreenState extends State<MapsScreen> {
                       color: color,
                       borderColor: zone.markerColor,
                       borderStrokeWidth: 2,
+                    );
+                  }).toList(),
+                ),
+              if (_dangerZones.isNotEmpty)
+                CircleLayer(
+                  circles: _dangerZones.map((zone) {
+                    final dangerColor = Theme.of(context).colorScheme.error;
+                    return CircleMarker(
+                      point: LatLng(zone.latitude, zone.longitude),
+                      radius: zone.radius,
+                      useRadiusInMeter: true,
+                      color: dangerColor.withAlpha((0.25 * 255).round()),
+                      borderColor: dangerColor,
+                      borderStrokeWidth: 3,
                     );
                   }).toList(),
                 ),
@@ -451,4 +548,18 @@ class SafeZone {
         return Colors.orange;
     }
   }
+}
+
+class DangerZone {
+  const DangerZone({
+    required this.name,
+    required this.latitude,
+    required this.longitude,
+    required this.radius,
+  });
+
+  final String name;
+  final double latitude;
+  final double longitude;
+  final double radius;
 }

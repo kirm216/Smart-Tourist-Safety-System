@@ -10,6 +10,7 @@ import 'package:speech_to_text/speech_recognition_result.dart';
 import '../auth/auth_service.dart';
 import '../profile/profile_screen.dart';
 import 'maps_screen.dart';
+import 'tourist_feedback_screen.dart';
 import 'tourist_location_sync_service.dart';
 
 class TouristDashboard extends StatefulWidget {
@@ -22,6 +23,8 @@ class TouristDashboard extends StatefulWidget {
 class _TouristDashboardState extends State<TouristDashboard> {
   final _locationSyncService = TouristLocationSyncService();
   final _speechToText = SpeechToText();
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>>?
+  _safetyStatusStream;
   late final Future<bool> _speechInitialization;
   bool _speechAvailable = false;
   bool _isListening = false;
@@ -34,6 +37,12 @@ class _TouristDashboardState extends State<TouristDashboard> {
     super.initState();
     _speechInitialization = _initializeSpeechRecognition();
     final user = AuthService().currentUser;
+    _safetyStatusStream = user == null
+        ? null
+        : FirebaseFirestore.instance
+              .collection('users')
+              .doc(user.uid)
+              .snapshots();
     if (user != null) {
       debugPrint('Tourist Dashboard opened for user ${user.uid}.');
       unawaited(_locationSyncService.startTracking(user.uid));
@@ -257,6 +266,8 @@ class _TouristDashboardState extends State<TouristDashboard> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  _buildSafetyStatusCard(context),
+                  const SizedBox(height: 24),
                   LayoutBuilder(
                     builder: (context, constraints) {
                       final cardWidth = constraints.maxWidth < 720
@@ -292,6 +303,16 @@ class _TouristDashboardState extends State<TouristDashboard> {
                               context,
                             ).colorScheme.tertiaryContainer,
                             onTap: () => _openProfile(context),
+                            width: cardWidth,
+                          ),
+                          _ActionCard(
+                            title: 'Feedback',
+                            subtitle: 'Share your experience',
+                            icon: Icons.rate_review_outlined,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.secondaryContainer,
+                            onTap: () => _openFeedback(context),
                             width: cardWidth,
                           ),
                         ],
@@ -364,6 +385,94 @@ class _TouristDashboardState extends State<TouristDashboard> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSafetyStatusCard(BuildContext context) {
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _safetyStatusStream,
+      builder: (context, snapshot) {
+        final data = snapshot.data?.data();
+        final status = switch (data?['currentSafetyStatus']) {
+          'safe' => 'Safe',
+          'danger' => 'Danger',
+          _ => 'Unknown',
+        };
+        final colorScheme = Theme.of(context).colorScheme;
+        final (
+          Color backgroundColor,
+          Color foregroundColor,
+          IconData icon,
+        ) = switch (status) {
+          'Danger' => (
+            colorScheme.errorContainer,
+            colorScheme.onErrorContainer,
+            Icons.warning_amber_rounded,
+          ),
+          'Safe' => (
+            colorScheme.primaryContainer,
+            colorScheme.onPrimaryContainer,
+            Icons.check_circle_outline,
+          ),
+          _ => (
+            colorScheme.surfaceContainerHighest,
+            colorScheme.onSurfaceVariant,
+            Icons.help_outline,
+          ),
+        };
+        final Object? zoneName;
+        if (status == 'Danger') {
+          zoneName = data?['currentDangerZone'];
+        } else if (status == 'Safe') {
+          zoneName = data?['currentSafeZone'];
+        } else {
+          zoneName = null;
+        }
+
+        return Card(
+          color: backgroundColor,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+            child: Row(
+              children: [
+                Icon(icon, color: foregroundColor, size: 30),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Safety Status: $status',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: foregroundColor,
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      if (zoneName is String && zoneName.trim().isNotEmpty)
+                        Text(
+                          zoneName,
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(color: foregroundColor),
+                        ),
+                      if (snapshot.hasError)
+                        Text(
+                          'Unable to load current safety status.',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: foregroundColor),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -487,6 +596,14 @@ class _TouristDashboardState extends State<TouristDashboard> {
   void _openProfile(BuildContext context) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (context) => const ProfileScreen()),
+    );
+  }
+
+  void _openFeedback(BuildContext context) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => const TouristFeedbackScreen(),
+      ),
     );
   }
 
