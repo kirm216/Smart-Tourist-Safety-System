@@ -10,7 +10,10 @@ class TouristsScreen extends StatefulWidget {
 
 class _TouristsScreenState extends State<TouristsScreen> {
   final _searchController = TextEditingController();
-  final _usersStream = FirebaseFirestore.instance.collection('users').snapshots();
+  final _usersStream = FirebaseFirestore.instance
+      .collection('users')
+      .snapshots();
+  final _approvalUpdates = <String, String>{};
   String _searchQuery = '';
 
   @override
@@ -96,42 +99,126 @@ class _TouristsScreenState extends State<TouristsScreen> {
                     itemCount: users.length,
                     separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
-                      final data = users[index].data();
+                      final user = users[index];
+                      final data = user.data();
                       final name = _text(data, 'fullName');
                       final email = _text(data, 'email');
                       final phone = _text(data, 'phone');
+                      final digitalTouristId = _text(data, 'digitalTouristId');
+                      final approvalStatus = _text(data, 'approvalStatus');
+                      final isPending =
+                          approvalStatus.toLowerCase() == 'pending';
+                      final updateInProgress = _approvalUpdates.containsKey(
+                        user.id,
+                      );
+                      final currentAction = _approvalUpdates[user.id];
+                      final statusLabel = approvalStatus.isEmpty
+                          ? 'Not provided'
+                          : '${approvalStatus[0].toUpperCase()}${approvalStatus.substring(1).toLowerCase()}';
 
                       return Card(
                         elevation: 0,
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 8,
-                          ),
-                          leading: CircleAvatar(
-                            child: Text(
-                              name.isEmpty ? '?' : name[0].toUpperCase(),
-                            ),
-                          ),
-                          title: Text(
-                            name.isEmpty ? 'Unnamed tourist' : name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                email.isEmpty ? 'Email not provided' : email,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            ListTile(
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              leading: CircleAvatar(
+                                child: Text(
+                                  name.isEmpty ? '?' : name[0].toUpperCase(),
+                                ),
+                              ),
+                              title: Text(
+                                name.isEmpty ? 'Unnamed tourist' : name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                              Text(
-                                phone.isEmpty ? 'Phone not provided' : phone,
+                              subtitle: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    email.isEmpty
+                                        ? 'Email not provided'
+                                        : email,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    'Digital Tourist ID: ${digitalTouristId.isEmpty ? 'Not available' : digitalTouristId}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    phone.isEmpty
+                                        ? 'Phone not provided'
+                                        : phone,
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          isThreeLine: true,
+                              trailing: Chip(
+                                label: Text(statusLabel),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                              isThreeLine: true,
+                            ),
+                            if (isPending)
+                              Padding(
+                                padding: const EdgeInsets.fromLTRB(
+                                  72,
+                                  0,
+                                  16,
+                                  12,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: updateInProgress
+                                            ? null
+                                            : () => _updateApprovalStatus(
+                                                user,
+                                                'rejected',
+                                              ),
+                                        icon: currentAction == 'rejected'
+                                            ? const SizedBox.square(
+                                                dimension: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : const Icon(Icons.close),
+                                        label: const Text('Reject'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: FilledButton.icon(
+                                        onPressed: updateInProgress
+                                            ? null
+                                            : () => _updateApprovalStatus(
+                                                user,
+                                                'approved',
+                                              ),
+                                        icon: currentAction == 'approved'
+                                            ? const SizedBox.square(
+                                                dimension: 16,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                    ),
+                                              )
+                                            : const Icon(Icons.check),
+                                        label: const Text('Approve'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
                         ),
                       );
                     },
@@ -143,6 +230,45 @@ class _TouristsScreenState extends State<TouristsScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _updateApprovalStatus(
+    QueryDocumentSnapshot<Map<String, dynamic>> user,
+    String status,
+  ) async {
+    if (_approvalUpdates.containsKey(user.id)) return;
+    setState(() => _approvalUpdates[user.id] = status);
+
+    try {
+      await user.reference.update({'approvalStatus': status});
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              status == 'approved'
+                  ? 'Tourist approved successfully.'
+                  : 'Tourist rejected successfully.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Unable to update approval status: $error'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _approvalUpdates.remove(user.id));
+      }
+    }
   }
 }
 
