@@ -24,6 +24,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
   final _firestore = FirebaseFirestore.instance;
 
   late final _usersStream = _firestore.collection('users').snapshots();
+  late final _touristsStream = _firestore.collection('tourists').snapshots();
   late final _sosStream = _firestore.collection('sos_alerts').snapshots();
   late final _safeZonesStream = _firestore.collection('safe_zones').snapshots();
   late final _dangerZonesStream = _firestore
@@ -48,6 +49,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
       ),
       body: _DashboardStreams(
         usersStream: _usersStream,
+        touristsStream: _touristsStream,
         sosStream: _sosStream,
         safeZonesStream: _safeZonesStream,
         dangerZonesStream: _dangerZonesStream,
@@ -63,6 +65,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
       await Future.wait([
         _firestore
             .collection('users')
+            .get(const GetOptions(source: Source.server)),
+        _firestore
+            .collection('tourists')
             .get(const GetOptions(source: Source.server)),
         _firestore
             .collection('sos_alerts')
@@ -95,6 +100,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 class _DashboardStreams extends StatelessWidget {
   const _DashboardStreams({
     required this.usersStream,
+    required this.touristsStream,
     required this.sosStream,
     required this.safeZonesStream,
     required this.dangerZonesStream,
@@ -103,6 +109,7 @@ class _DashboardStreams extends StatelessWidget {
   });
 
   final Stream<QuerySnapshot<Map<String, dynamic>>> usersStream;
+  final Stream<QuerySnapshot<Map<String, dynamic>>> touristsStream;
   final Stream<QuerySnapshot<Map<String, dynamic>>> sosStream;
   final Stream<QuerySnapshot<Map<String, dynamic>>> safeZonesStream;
   final Stream<QuerySnapshot<Map<String, dynamic>>> dangerZonesStream;
@@ -117,35 +124,43 @@ class _DashboardStreams extends StatelessWidget {
         final state = _snapshotState(usersSnapshot);
         if (state != null) return state;
         return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          stream: sosStream,
-          builder: (context, sosSnapshot) {
-            final state = _snapshotState(sosSnapshot);
+          stream: touristsStream,
+          builder: (context, touristsSnapshot) {
+            final state = _snapshotState(touristsSnapshot);
             if (state != null) return state;
             return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: safeZonesStream,
-              builder: (context, safeZonesSnapshot) {
-                final state = _snapshotState(safeZonesSnapshot);
+              stream: sosStream,
+              builder: (context, sosSnapshot) {
+                final state = _snapshotState(sosSnapshot);
                 if (state != null) return state;
                 return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: dangerZonesStream,
-                  builder: (context, dangerZonesSnapshot) {
-                    final state = _snapshotState(dangerZonesSnapshot);
+                  stream: safeZonesStream,
+                  builder: (context, safeZonesSnapshot) {
+                    final state = _snapshotState(safeZonesSnapshot);
                     if (state != null) return state;
                     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                      stream: geofenceEventsStream,
-                      builder: (context, geofenceSnapshot) {
-                        final state = _snapshotState(geofenceSnapshot);
+                      stream: dangerZonesStream,
+                      builder: (context, dangerZonesSnapshot) {
+                        final state = _snapshotState(dangerZonesSnapshot);
                         if (state != null) return state;
-                        return builder(
-                          _DashboardData(
-                            users: usersSnapshot.data?.docs ?? const [],
-                            sosAlerts: sosSnapshot.data?.docs ?? const [],
-                            safeZones: safeZonesSnapshot.data?.docs ?? const [],
-                            dangerZones:
-                                dangerZonesSnapshot.data?.docs ?? const [],
-                            geofenceEvents:
-                                geofenceSnapshot.data?.docs ?? const [],
-                          ),
+                        return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                          stream: geofenceEventsStream,
+                          builder: (context, geofenceSnapshot) {
+                            final state = _snapshotState(geofenceSnapshot);
+                            if (state != null) return state;
+                            return builder(
+                              _DashboardData(
+                                users: usersSnapshot.data?.docs ?? const [],
+                                tourists: touristsSnapshot.data?.docs ?? const [],
+                                sosAlerts: sosSnapshot.data?.docs ?? const [],
+                                safeZones: safeZonesSnapshot.data?.docs ?? const [],
+                                dangerZones:
+                                    dangerZonesSnapshot.data?.docs ?? const [],
+                                geofenceEvents:
+                                    geofenceSnapshot.data?.docs ?? const [],
+                              ),
+                            );
+                          },
                         );
                       },
                     );
@@ -179,6 +194,7 @@ class _DashboardStreams extends StatelessWidget {
 class _DashboardData {
   const _DashboardData({
     required this.users,
+    required this.tourists,
     required this.sosAlerts,
     required this.safeZones,
     required this.dangerZones,
@@ -186,6 +202,7 @@ class _DashboardData {
   });
 
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> users;
+  final List<QueryDocumentSnapshot<Map<String, dynamic>>> tourists;
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> sosAlerts;
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> safeZones;
   final List<QueryDocumentSnapshot<Map<String, dynamic>>> dangerZones;
@@ -217,6 +234,9 @@ class _DashboardContent extends StatelessWidget {
     final activeAlerts = data.sosAlerts
         .where((alert) => !_isResolved(alert.data()))
         .toList();
+    final hardwareActiveAlerts = data.tourists
+        .where((tourist) => tourist.data()['sosActive'] == true)
+        .length;
     final resolvedAlerts = data.sosAlerts
         .where((alert) => _isResolved(alert.data()))
         .toList();
@@ -272,7 +292,7 @@ class _DashboardContent extends StatelessWidget {
       ),
       _Metric(
         'Active SOS Alerts',
-        activeAlerts.length,
+        activeAlerts.length + hardwareActiveAlerts,
         Icons.crisis_alert_outlined,
         theme.colorScheme.error,
       ),

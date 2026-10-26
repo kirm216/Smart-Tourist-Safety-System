@@ -2,9 +2,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
 class SosDetailsScreen extends StatefulWidget {
-  const SosDetailsScreen({super.key, required this.alert});
+  const SosDetailsScreen({
+    super.key,
+    required this.alert,
+    this.source = 'sos_alert',
+  });
 
   final QueryDocumentSnapshot<Map<String, dynamic>> alert;
+  final String source;
 
   @override
   State<SosDetailsScreen> createState() => _SosDetailsScreenState();
@@ -12,6 +17,7 @@ class SosDetailsScreen extends StatefulWidget {
 
 class _SosDetailsScreenState extends State<SosDetailsScreen> {
   bool _isUpdating = false;
+  String _workflowStatus = 'Active';
 
   @override
   Widget build(BuildContext context) {
@@ -41,10 +47,14 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
           }
 
           final data = document.data() ?? <String, dynamic>{};
-          final status = _statusLabel(data);
+          final status = widget.source == 'hardware'
+              ? _hardwareStatusLabel(data)
+              : _statusLabel(data);
           final nextStatus = _nextStatus(status);
           final phone = _stringValue(data['phone'] ?? data['phoneNumber']);
-          final resolvedAt = _formatTimestamp(data['resolvedAt']);
+          final resolvedAt = widget.source == 'hardware'
+              ? _formatTimestamp(data['sosResolvedAt'])
+              : _formatTimestamp(data['resolvedAt']);
 
           return Column(
             children: [
@@ -59,9 +69,9 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              _stringValue(data['fullName']).isEmpty
-                                  ? 'Unnamed tourist'
-                                  : _stringValue(data['fullName']),
+                              widget.source == 'hardware'
+                                  ? _stringValue(data['uid'], fallback: widget.alert.id)
+                                  : _stringValue(data['fullName'], fallback: 'Unnamed tourist'),
                               style: Theme.of(context).textTheme.headlineSmall,
                             ),
                             const SizedBox(height: 12),
@@ -76,37 +86,85 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
                         padding: const EdgeInsets.all(16),
                         child: Column(
                           children: [
-                            _DetailRow(
-                              icon: Icons.email_outlined,
-                              label: 'Email',
-                              value: _displayValue(data['email']),
-                            ),
-                            if (phone.isNotEmpty)
+                            if (widget.source == 'hardware') ...[
                               _DetailRow(
-                                icon: Icons.phone_outlined,
-                                label: 'Phone Number',
-                                value: phone,
+                                icon: Icons.tag_outlined,
+                                label: 'Tourist ID',
+                                value: _stringValue(data['uid'], fallback: widget.alert.id),
                               ),
-                            _DetailRow(
-                              icon: Icons.location_on_outlined,
-                              label: 'Latitude',
-                              value: _displayValue(data['latitude']),
-                            ),
-                            _DetailRow(
-                              icon: Icons.explore_outlined,
-                              label: 'Longitude',
-                              value: _displayValue(data['longitude']),
-                            ),
-                            _DetailRow(
-                              icon: Icons.schedule_outlined,
-                              label: 'Timestamp',
-                              value: _formatTimestamp(data['timestamp']),
-                            ),
-                            _DetailRow(
-                              icon: Icons.flag_outlined,
-                              label: 'Current Status',
-                              value: status,
-                            ),
+                              _DetailRow(
+                                icon: Icons.location_on_outlined,
+                                label: 'Latitude',
+                                value: _displayValue(data['latitude']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.explore_outlined,
+                                label: 'Longitude',
+                                value: _displayValue(data['longitude']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.gps_fixed_outlined,
+                                label: 'GPS validity',
+                                value: _gpsStatus(data['gpsValid']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.crisis_alert_outlined,
+                                label: 'SOS triggered time',
+                                value: _formatTimestamp(data['sosTriggeredAt']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.schedule_outlined,
+                                label: 'Last updated',
+                                value: _formatTimestamp(data['lastUpdated']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.format_list_numbered_rounded,
+                                label: 'Sequence',
+                                value: _displayValue(data['sequence']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.signal_cellular_alt_2_bar_outlined,
+                                label: 'RSSI',
+                                value: _displayValue(data['rssi']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.flag_outlined,
+                                label: 'Current SOS status',
+                                value: status,
+                              ),
+                            ] else ...[
+                              _DetailRow(
+                                icon: Icons.email_outlined,
+                                label: 'Email',
+                                value: _displayValue(data['email']),
+                              ),
+                              if (phone.isNotEmpty)
+                                _DetailRow(
+                                  icon: Icons.phone_outlined,
+                                  label: 'Phone Number',
+                                  value: phone,
+                                ),
+                              _DetailRow(
+                                icon: Icons.location_on_outlined,
+                                label: 'Latitude',
+                                value: _displayValue(data['latitude']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.explore_outlined,
+                                label: 'Longitude',
+                                value: _displayValue(data['longitude']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.schedule_outlined,
+                                label: 'Timestamp',
+                                value: _formatTimestamp(data['timestamp']),
+                              ),
+                              _DetailRow(
+                                icon: Icons.flag_outlined,
+                                label: 'Current Status',
+                                value: status,
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -154,6 +212,42 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
     String status,
   ) async {
     setState(() => _isUpdating = true);
+
+    if (widget.source == 'hardware') {
+      final updates = <String, dynamic>{
+        'lastUpdated': FieldValue.serverTimestamp(),
+      };
+      if (status == 'Resolved') {
+        updates['sosActive'] = false;
+        updates['sosResolvedAt'] = FieldValue.serverTimestamp();
+      } else {
+        _workflowStatus = status;
+      }
+
+      try {
+        await reference.update(updates);
+        if (!mounted) return;
+        if (status != 'Resolved') {
+          setState(() => _workflowStatus = status);
+        } else {
+          setState(() => _workflowStatus = 'Resolved');
+        }
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text('Status updated to $status.')));
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Unable to update status: $error')),
+          );
+      } finally {
+        if (mounted) setState(() => _isUpdating = false);
+      }
+      return;
+    }
+
     final updates = <String, dynamic>{
       'status': status,
       'updatedAt': FieldValue.serverTimestamp(),
@@ -180,6 +274,17 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
     }
   }
 
+  String _hardwareStatusLabel(Map<String, dynamic> data) {
+    if (data['sosActive'] == false) return 'Resolved';
+    if (_workflowStatus.isNotEmpty &&
+        _workflowStatus != 'Active' &&
+        _workflowStatus != 'Acknowledged' &&
+        _workflowStatus != 'In Progress') {
+      return 'Active';
+    }
+    return _workflowStatus.isEmpty ? 'Active' : _workflowStatus;
+  }
+
   static String _statusLabel(Map<String, dynamic> data) {
     final rawStatus = _stringValue(data['status']);
     if (rawStatus.toLowerCase() == 'resolved' || data['resolved'] == true) {
@@ -195,6 +300,13 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
       default:
         return rawStatus.isEmpty ? 'Unknown' : rawStatus;
     }
+  }
+
+  static String _gpsStatus(Object? value) {
+    if (value is bool) {
+      return value ? 'Valid' : 'Invalid';
+    }
+    return 'Unknown';
   }
 
   static String? _nextStatus(String status) {
@@ -221,13 +333,13 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
     }
   }
 
-  static String _stringValue(Object? value) =>
-      value is String ? value.trim() : '';
+  static String _stringValue(Object? value, {String fallback = ''}) =>
+      value is String && value.trim().isNotEmpty ? value.trim() : fallback;
 
   static String _displayValue(Object? value) {
     if (value is num) return value.toString();
-    final text = _stringValue(value);
-    return text.isEmpty ? 'Not provided' : text;
+    final text = value is String ? value.trim() : '';
+    return text.isEmpty ? 'Not available' : text;
   }
 
   static String _formatTimestamp(Object? value) {
@@ -235,12 +347,21 @@ class _SosDetailsScreenState extends State<SosDetailsScreen> {
         ? value.toDate()
         : value is DateTime
         ? value
+        : value is String
+        ? _parseStringTimestamp(value)
         : null;
     if (timestamp == null) return 'Not available';
 
     String twoDigits(int number) => number.toString().padLeft(2, '0');
     return '${timestamp.year}-${twoDigits(timestamp.month)}-${twoDigits(timestamp.day)} '
-        '${twoDigits(timestamp.hour)}:${twoDigits(timestamp.minute)}';
+        '${twoDigits(timestamp.hour)}:${twoDigits(timestamp.minute)}:${twoDigits(timestamp.second)}';
+  }
+
+  static DateTime? _parseStringTimestamp(String value) {
+    final parsed = DateTime.tryParse(value);
+    if (parsed != null) return parsed;
+    final isoValue = value.endsWith('Z') ? value.replaceFirst('Z', '+00:00') : value;
+    return DateTime.tryParse(isoValue);
   }
 }
 
@@ -308,7 +429,7 @@ class _DetailRow extends StatelessWidget {
           Icon(icon, size: 20),
           const SizedBox(width: 12),
           SizedBox(
-            width: 112,
+            width: 140,
             child: Text(
               label,
               style: const TextStyle(fontWeight: FontWeight.w600),

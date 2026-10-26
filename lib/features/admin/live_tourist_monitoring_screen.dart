@@ -32,6 +32,9 @@ class _LiveTouristMonitoringScreenState
   final _usersStream = FirebaseFirestore.instance
       .collection('users')
       .snapshots();
+  final _touristsStream = FirebaseFirestore.instance
+      .collection('tourists')
+      .snapshots();
   final _sosStream = FirebaseFirestore.instance
       .collection('sos_alerts')
       .snapshots();
@@ -75,23 +78,40 @@ class _LiveTouristMonitoringScreenState
           }
 
           return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-            stream: _sosStream,
-            builder: (context, sosSnapshot) {
-              if (sosSnapshot.hasError) {
+            stream: _touristsStream,
+            builder: (context, touristsSnapshot) {
+              if (touristsSnapshot.hasError) {
                 return _MessageState(
                   icon: Icons.cloud_off_outlined,
-                  message: 'Unable to load active SOS alerts.',
-                  detail: sosSnapshot.error.toString(),
+                  message: 'Unable to load ESP32 tourist telemetry.',
+                  detail: touristsSnapshot.error.toString(),
                 );
               }
-              if (sosSnapshot.connectionState == ConnectionState.waiting) {
+              if (touristsSnapshot.connectionState == ConnectionState.waiting) {
                 return const Center(child: CircularProgressIndicator());
               }
 
-              return _buildMonitoringView(
-                context,
-                usersSnapshot.data?.docs ?? const [],
-                sosSnapshot.data?.docs ?? const [],
+              return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                stream: _sosStream,
+                builder: (context, sosSnapshot) {
+                  if (sosSnapshot.hasError) {
+                    return _MessageState(
+                      icon: Icons.cloud_off_outlined,
+                      message: 'Unable to load active SOS alerts.',
+                      detail: sosSnapshot.error.toString(),
+                    );
+                  }
+                  if (sosSnapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  return _buildMonitoringView(
+                    context,
+                    usersSnapshot.data?.docs ?? const [],
+                    touristsSnapshot.data?.docs ?? const [],
+                    sosSnapshot.data?.docs ?? const [],
+                  );
+                },
               );
             },
           );
@@ -103,13 +123,19 @@ class _LiveTouristMonitoringScreenState
   Widget _buildMonitoringView(
     BuildContext context,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> userDocuments,
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> touristDocuments,
     List<QueryDocumentSnapshot<Map<String, dynamic>>> sosDocuments,
   ) {
-    final tourists = userDocuments
-        .map((document) => _Tourist.fromDocument(document, _now))
-        .toList();
+    final tourists = [
+      ...userDocuments.map((document) => _Tourist.fromDocument(document, _now)),
+      ...touristDocuments
+          .map((document) => _Tourist.fromHardwareDocument(document, _now)),
+    ];
     final activeSosDocuments = sosDocuments
         .where((document) => _isActiveSos(document.data()))
+        .toList();
+    final hardwareActiveTourists = tourists
+        .where((tourist) => tourist.isHardware && tourist.sosActive)
         .toList();
     final activeSosUserIds = <String>{};
     for (final alert in activeSosDocuments) {
@@ -118,7 +144,7 @@ class _LiveTouristMonitoringScreenState
     }
 
     final touristsWithCoordinates = tourists
-        .where((tourist) => tourist.location != null)
+        .where((tourist) => tourist.location != null && (tourist.isHardware ? tourist.gpsValid != false : true))
         .toList();
     final query = _searchQuery.trim().toLowerCase();
     final visibleTourists = touristsWithCoordinates.where((tourist) {
@@ -126,6 +152,7 @@ class _LiveTouristMonitoringScreenState
       final matchesSearch =
           query.isEmpty ||
           tourist.fullName.toLowerCase().contains(query) ||
+          tourist.documentId.toLowerCase().contains(query) ||
           tourist.email.toLowerCase().contains(query);
       final matchesFilter = switch (_selectedFilter) {
         _TouristFilter.all => true,
@@ -153,7 +180,7 @@ class _LiveTouristMonitoringScreenState
               danger: tourists
                   .where((tourist) => tourist.safetyStatus == 'danger')
                   .length,
-              activeSos: activeSosDocuments.length,
+              activeSos: activeSosDocuments.length + hardwareActiveTourists.length,
             ),
           ),
         ),
@@ -313,8 +340,11 @@ class _LiveTouristMonitoringScreenState
   }
 
   bool _hasActiveSos(_Tourist tourist, Set<String> activeSosUserIds) =>
-      activeSosUserIds.contains(tourist.documentId) ||
-      (tourist.userId.isNotEmpty && activeSosUserIds.contains(tourist.userId));
+      tourist.isHardware
+          ? tourist.sosActive
+          : activeSosUserIds.contains(tourist.documentId) ||
+              (tourist.userId.isNotEmpty &&
+                  activeSosUserIds.contains(tourist.userId));
 
   Color _markerColor(
     BuildContext context,
@@ -373,6 +403,13 @@ class _LiveTouristMonitoringScreenState
                 ],
               ),
               const Divider(height: 24),
+              if (tourist.isHardware) ...[
+                _DetailRow(
+                  icon: Icons.tag_outlined,
+                  label: 'Tourist ID',
+                  value: tourist.documentId,
+                ),
+              ],
               _DetailRow(
                 icon: Icons.email_outlined,
                 label: 'Email',
@@ -393,33 +430,67 @@ class _LiveTouristMonitoringScreenState
                 label: 'Longitude',
                 value: tourist.longitude?.toStringAsFixed(6) ?? 'Not available',
               ),
+              if (tourist.isHardware) ...[
+                _DetailRow(
+                  icon: Icons.gps_fixed_outlined,
+                  label: 'GPS status',
+                  value: tourist.gpsValid == null
+                      ? 'Unknown'
+                      : tourist.gpsValid!
+                          ? 'Valid'
+                          : 'Invalid',
+                ),
+              ],
               _DetailRow(
                 icon: Icons.schedule_outlined,
                 label: 'Last Updated',
                 value: _formatDateTime(tourist.lastUpdated),
               ),
-              _DetailRow(
-                icon: Icons.shield_outlined,
-                label: 'Current Safe Zone',
-                value: tourist.currentSafeZone,
-              ),
-              _DetailRow(
-                icon: Icons.warning_amber_outlined,
-                label: 'Current Danger Zone',
-                value: tourist.currentDangerZone,
-              ),
-              _DetailRow(
-                icon: Icons.health_and_safety_outlined,
-                label: 'Current Safety Status',
-                value: tourist.safetyStatusLabel,
-                valueColor: statusColor,
-              ),
-              _DetailRow(
-                icon: Icons.manage_accounts_outlined,
-                label: 'Account Status',
-                value: tourist.accountStatus,
-                valueColor: colorScheme.onSurface,
-              ),
+              if (tourist.isHardware) ...[
+                _DetailRow(
+                  icon: Icons.wifi_tethering_outlined,
+                  label: 'Online/offline status',
+                  value: tourist.isOnline ? 'Online' : 'Offline',
+                ),
+                _DetailRow(
+                  icon: Icons.crisis_alert_outlined,
+                  label: 'SOS status',
+                  value: tourist.sosActive ? 'Active' : 'Resolved',
+                ),
+                _DetailRow(
+                  icon: Icons.format_list_numbered_outlined,
+                  label: 'Sequence',
+                  value: tourist.sequence?.toString() ?? 'Not available',
+                ),
+                _DetailRow(
+                  icon: Icons.signal_cellular_alt_2_bar_outlined,
+                  label: 'RSSI',
+                  value: tourist.rssi?.toString() ?? 'Not available',
+                ),
+              ] else ...[
+                _DetailRow(
+                  icon: Icons.shield_outlined,
+                  label: 'Current Safe Zone',
+                  value: tourist.currentSafeZone,
+                ),
+                _DetailRow(
+                  icon: Icons.warning_amber_outlined,
+                  label: 'Current Danger Zone',
+                  value: tourist.currentDangerZone,
+                ),
+                _DetailRow(
+                  icon: Icons.health_and_safety_outlined,
+                  label: 'Current Safety Status',
+                  value: tourist.safetyStatusLabel,
+                  valueColor: statusColor,
+                ),
+                _DetailRow(
+                  icon: Icons.manage_accounts_outlined,
+                  label: 'Account Status',
+                  value: tourist.accountStatus,
+                  valueColor: colorScheme.onSurface,
+                ),
+              ],
               if (hasActiveSos)
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
@@ -651,6 +722,11 @@ class _Tourist {
     required this.currentDangerZone,
     required this.safetyStatus,
     required this.accountStatus,
+    required this.source,
+    this.gpsValid,
+    this.sosActive = false,
+    this.sequence,
+    this.rssi,
   });
 
   final String documentId;
@@ -666,6 +742,13 @@ class _Tourist {
   final String currentDangerZone;
   final String safetyStatus;
   final String accountStatus;
+  final String source;
+  final bool? gpsValid;
+  final bool sosActive;
+  final num? sequence;
+  final num? rssi;
+
+  bool get isHardware => source == 'hardware';
 
   LatLng? get location {
     if (latitude == null || longitude == null) return null;
@@ -709,6 +792,40 @@ class _Tourist {
         data['accountStatus'],
         fallback: 'Not available',
       ),
+      source: 'user',
+    );
+  }
+
+  factory _Tourist.fromHardwareDocument(
+    QueryDocumentSnapshot<Map<String, dynamic>> document,
+    DateTime now,
+  ) {
+    final data = document.data();
+    final uid = _stringValue(data['uid'], fallback: document.id);
+    final latitude = _coordinate(data['latitude'], min: -90, max: 90);
+    final longitude = _coordinate(data['longitude'], min: -180, max: 180);
+    final lastUpdated = _dateTime(data['lastUpdated']);
+    final age = lastUpdated == null ? null : now.difference(lastUpdated);
+
+    return _Tourist(
+      documentId: document.id,
+      userId: uid,
+      fullName: uid,
+      email: 'Not available',
+      phone: 'Not available',
+      latitude: latitude,
+      longitude: longitude,
+      lastUpdated: lastUpdated,
+      isOnline: age != null && age >= Duration.zero && age <= _onlineWindow,
+      currentSafeZone: 'Unknown',
+      currentDangerZone: 'Unknown',
+      safetyStatus: 'Unknown',
+      accountStatus: 'Unknown',
+      source: 'hardware',
+      gpsValid: data['gpsValid'] is bool ? data['gpsValid'] as bool : null,
+      sosActive: data['sosActive'] == true,
+      sequence: data['sequence'] is num ? data['sequence'] as num : null,
+      rssi: data['rssi'] is num ? data['rssi'] as num : null,
     );
   }
 }
@@ -739,6 +856,12 @@ double? _coordinate(Object? value, {required double min, required double max}) {
 DateTime? _dateTime(Object? value) {
   if (value is Timestamp) return value.toDate();
   if (value is DateTime) return value;
+  if (value is String) {
+    final parsed = DateTime.tryParse(value);
+    if (parsed != null) return parsed;
+    final isoValue = value.endsWith('Z') ? value.replaceFirst('Z', '+00:00') : value;
+    return DateTime.tryParse(isoValue);
+  }
   return null;
 }
 
