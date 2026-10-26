@@ -20,13 +20,21 @@ class TouristDashboard extends StatefulWidget {
   State<TouristDashboard> createState() => _TouristDashboardState();
 }
 
-class _TouristDashboardState extends State<TouristDashboard> {
+class _TouristDashboardState extends State<TouristDashboard>
+    with WidgetsBindingObserver {
   final _locationSyncService = TouristLocationSyncService();
   final _speechToText = SpeechToText();
+  final ValueNotifier<int> _sosCountdown = ValueNotifier<int>(10);
   late final Stream<DocumentSnapshot<Map<String, dynamic>>>?
   _safetyStatusStream;
   late final Future<bool> _speechInitialization;
+  Timer? _speechRestartTimer;
+  Timer? _sosCountdownTimer;
   bool _speechAvailable = false;
+  bool _isVoiceMonitoring = true;
+  bool _isDashboardActive = false;
+  bool _speechSessionActive = false;
+  bool _isCountdownActive = false;
   bool _isListening = false;
   bool _isStartingVoiceSOS = false;
   bool _voiceSosTriggered = false;
@@ -35,6 +43,10 @@ class _TouristDashboardState extends State<TouristDashboard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycleState = WidgetsBinding.instance.lifecycleState;
+    _isDashboardActive =
+        lifecycleState == null || lifecycleState == AppLifecycleState.resumed;
     _speechInitialization = _initializeSpeechRecognition();
     final user = AuthService().currentUser;
     _safetyStatusStream = user == null
@@ -55,9 +67,37 @@ class _TouristDashboardState extends State<TouristDashboard> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _speechRestartTimer?.cancel();
+    _sosCountdownTimer?.cancel();
+    _sosCountdown.dispose();
     unawaited(_cancelSpeechRecognition());
     unawaited(_locationSyncService.stopTracking(markOffline: true));
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final isActive = state == AppLifecycleState.resumed;
+    _isDashboardActive = isActive;
+
+    if (!isActive) {
+      _speechRestartTimer?.cancel();
+      _speechRestartTimer = null;
+      if (_speechSessionActive || _speechToText.isListening) {
+        _speechSessionActive = false;
+        unawaited(_stopSpeechRecognitionForLifecycle());
+      }
+      if (mounted) {
+        setState(() {
+          _isListening = false;
+          _isStartingVoiceSOS = false;
+        });
+      }
+      return;
+    }
+
+    _scheduleVoiceRecognitionRestart();
   }
 
   Future<bool> _initializeSpeechRecognition() async {
@@ -71,11 +111,21 @@ class _TouristDashboardState extends State<TouristDashboard> {
           _speechAvailable = available;
         });
       }
+      if (available) {
+        _scheduleVoiceRecognitionRestart();
+      } else if (mounted) {
+        setState(() {
+          _isVoiceMonitoring = false;
+          _speechErrorMessage =
+              'Voice SOS is unavailable. Please check microphone permission and try again.';
+        });
+      }
       return available;
     } catch (error) {
       debugPrint('Voice SOS speech recognition initialization failed: $error');
       if (mounted) {
         setState(() {
+          _isVoiceMonitoring = false;
           _speechErrorMessage =
               'Voice SOS is unavailable. Please check microphone permission and try again.';
         });
@@ -86,16 +136,25 @@ class _TouristDashboardState extends State<TouristDashboard> {
 
   void _onSpeechStatus(String status) {
     if (!mounted) return;
-    setState(() {
-      _isListening = status == 'listening';
-      if (_isListening || status == 'notListening' || status == 'done') {
+    if (status == 'listening') {
+      setState(() {
+        _isListening = true;
         _isStartingVoiceSOS = false;
-      }
-    });
+      });
+      return;
+    }
+
+    if (status == 'notListening' || status == 'done') {
+      _speechSessionActive = false;
+      setState(() {
+        _isListening = false;
+        _isStartingVoiceSOS = false;
+      });
+      _scheduleVoiceRecognitionRestart();
+    }
   }
 
   void _onSpeechError(SpeechRecognitionError error) {
-    final wasActive = _isListening || _isStartingVoiceSOS;
     final permissionDenied = error.errorMsg.toLowerCase().contains(
       'permission',
     );
@@ -104,19 +163,31 @@ class _TouristDashboardState extends State<TouristDashboard> {
         : 'Voice SOS is unavailable right now. Please try again.';
     debugPrint('Voice SOS speech recognition error: ${error.errorMsg}');
     if (!mounted) return;
+    _speechSessionActive = false;
     setState(() {
       _speechErrorMessage = message;
       _isListening = false;
       _isStartingVoiceSOS = false;
+      if (permissionDenied) _isVoiceMonitoring = false;
     });
-    if (wasActive) _showSnackBar(context, message);
+    if (permissionDenied) {
+      _showSnackBar(context, message);
+    } else {
+      _scheduleVoiceRecognitionRestart(const Duration(seconds: 2));
+    }
   }
 
-  Future<void> _startVoiceSOS() async {
-    if (_isListening || _isStartingVoiceSOS || _speechToText.isListening) {
+  Future<void> _startVoiceSOS({bool automatic = false}) async {
+    if (!automatic && !_voiceSosTriggered && !_isCountdownActive) {
+      _isVoiceMonitoring = true;
+    }
+    if (!_canStartVoiceRecognition) {
       return;
     }
 
+    _speechRestartTimer?.cancel();
+    _speechRestartTimer = null;
+    _speechSessionActive = true;
     setState(() {
       _isStartingVoiceSOS = true;
       _speechErrorMessage = null;
@@ -125,8 +196,18 @@ class _TouristDashboardState extends State<TouristDashboard> {
     try {
       _speechAvailable = await _speechInitialization;
       if (!mounted) return;
+      if (!_isDashboardActive ||
+          !_isVoiceMonitoring ||
+          _isCountdownActive ||
+          _voiceSosTriggered) {
+        _speechSessionActive = false;
+        setState(() => _isStartingVoiceSOS = false);
+        return;
+      }
       if (!_speechAvailable) {
+        _speechSessionActive = false;
         setState(() {
+          _isVoiceMonitoring = false;
           _isStartingVoiceSOS = false;
         });
         _showSnackBar(
@@ -137,10 +218,6 @@ class _TouristDashboardState extends State<TouristDashboard> {
         return;
       }
 
-      _voiceSosTriggered = false;
-      setState(() {
-        _isListening = true;
-      });
       await _speechToText.listen(
         onResult: _onSpeechResult,
         listenOptions: SpeechListenOptions(
@@ -148,59 +225,170 @@ class _TouristDashboardState extends State<TouristDashboard> {
           pauseFor: const Duration(seconds: 3),
         ),
       );
+      if (!_speechToText.isListening) {
+        _speechSessionActive = false;
+        if (mounted) {
+          setState(() {
+            _isListening = false;
+            _isStartingVoiceSOS = false;
+          });
+          _scheduleVoiceRecognitionRestart();
+        }
+      }
     } catch (error) {
       debugPrint('Unable to start Voice SOS speech recognition: $error');
+      _speechSessionActive = false;
       if (!mounted) return;
       final message =
           'Voice SOS could not start. Please check microphone permission and try again.';
+      final permissionDenied = error.toString().toLowerCase().contains(
+        'permission',
+      );
       setState(() {
         _isListening = false;
         _isStartingVoiceSOS = false;
+        if (permissionDenied) _isVoiceMonitoring = false;
         _speechErrorMessage = message;
       });
-      _showSnackBar(context, message);
+      if (!automatic) _showSnackBar(context, message);
+      if (!permissionDenied) {
+        _scheduleVoiceRecognitionRestart(const Duration(seconds: 2));
+      }
     }
   }
 
   void _onSpeechResult(SpeechRecognitionResult result) {
     if (_voiceSosTriggered ||
+        _isCountdownActive ||
         !RegExp(
-          r'\b(?:sos|help|emergency)\b',
+          r'(?<![a-z0-9])s[\W_]*o[\W_]*s(?![a-z0-9])',
           caseSensitive: false,
         ).hasMatch(result.recognizedWords)) {
       return;
     }
 
-    _voiceSosTriggered = true;
-    if (mounted) {
-      setState(() {
-        _isListening = false;
-        _isStartingVoiceSOS = false;
-      });
-    }
-    unawaited(_confirmVoiceSOS());
+    unawaited(_beginSosCountdown());
   }
 
-  Future<void> _confirmVoiceSOS() async {
-    try {
-      await _speechToText.cancel();
-    } catch (error) {
-      debugPrint('Unable to cancel Voice SOS listening: $error');
-      if (mounted) {
-        _showSnackBar(
-          context,
-          'Voice listening could not be stopped automatically.',
-        );
+  bool get _canStartVoiceRecognition =>
+      mounted &&
+      _isDashboardActive &&
+      _isVoiceMonitoring &&
+      !_isCountdownActive &&
+      !_voiceSosTriggered &&
+      !_speechSessionActive &&
+      !_isListening &&
+      !_isStartingVoiceSOS &&
+      !_speechToText.isListening;
+
+  void _scheduleVoiceRecognitionRestart([
+    Duration delay = const Duration(seconds: 1),
+  ]) {
+    if (!_canStartVoiceRecognition || _speechRestartTimer != null) return;
+    _speechRestartTimer = Timer(delay, () {
+      _speechRestartTimer = null;
+      if (_canStartVoiceRecognition) {
+        unawaited(_startVoiceSOS(automatic: true));
       }
+    });
+  }
+
+  Future<void> _beginSosCountdown() async {
+    if (_voiceSosTriggered || _isCountdownActive || !mounted) return;
+
+    _voiceSosTriggered = true;
+    _isCountdownActive = true;
+    _speechRestartTimer?.cancel();
+    _speechRestartTimer = null;
+    _speechSessionActive = false;
+    _sosCountdown.value = 10;
+    setState(() {
+      _isListening = false;
+      _isStartingVoiceSOS = false;
+    });
+    unawaited(_cancelSpeechRecognition());
+    _startSosCountdownTimer();
+
+    final sendSos = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('SOS detected'),
+        content: ValueListenableBuilder<int>(
+          valueListenable: _sosCountdown,
+          builder: (context, seconds, _) =>
+              Text('SOS will be sent in $seconds seconds.'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: _cancelSosCountdown,
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    if (sendSos == true) {
+      _isVoiceMonitoring = false;
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          _sendSOS(dialogContext);
+          return const AlertDialog(
+            content: SizedBox(
+              height: 120,
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          );
+        },
+      );
+      return;
     }
-    if (mounted) await _confirmAndSendSOS(context);
+
+    _scheduleVoiceRecognitionRestart();
+  }
+
+  void _cancelSosCountdown() {
+    if (!_isCountdownActive) return;
+    _sosCountdownTimer?.cancel();
+    _sosCountdownTimer = null;
+    _isCountdownActive = false;
+    _voiceSosTriggered = false;
+    _sosCountdown.value = 10;
+    Navigator.of(context).pop(false);
+    _scheduleVoiceRecognitionRestart();
+  }
+
+  void _startSosCountdownTimer() {
+    _sosCountdownTimer?.cancel();
+    _sosCountdown.value = 10;
+    _sosCountdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      final remaining = _sosCountdown.value - 1;
+      _sosCountdown.value = remaining;
+      if (remaining > 0) return;
+
+      timer.cancel();
+      _sosCountdownTimer = null;
+      _isCountdownActive = false;
+      _isVoiceMonitoring = false;
+      if (mounted) Navigator.of(context).pop(true);
+    });
   }
 
   Future<void> _cancelSpeechRecognition() async {
     try {
       await _speechToText.cancel();
     } catch (error) {
-      debugPrint('Unable to stop Voice SOS during dashboard disposal: $error');
+      debugPrint('Unable to stop Voice SOS recognition: $error');
+    }
+  }
+
+  Future<void> _stopSpeechRecognitionForLifecycle() async {
+    await _cancelSpeechRecognition();
+    if (mounted && _isDashboardActive) {
+      _scheduleVoiceRecognitionRestart();
     }
   }
 
@@ -356,10 +544,20 @@ class _TouristDashboardState extends State<TouristDashboard> {
                           : _startVoiceSOS,
                     ),
                   ),
+                  if (_speechErrorMessage != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      _speechErrorMessage!,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ],
                   if (_isListening) ...[
                     const SizedBox(height: 8),
                     Text(
-                      'Say "SOS", "help", or "emergency".',
+                      'Say "SOS" to start an emergency alert.',
                       textAlign: TextAlign.center,
                       style: Theme.of(context).textTheme.bodyMedium,
                     ),
