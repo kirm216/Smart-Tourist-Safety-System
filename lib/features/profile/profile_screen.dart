@@ -21,6 +21,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _firestore = FirebaseFirestore.instance;
 
   bool _isSaving = false;
+  String? _digitalTouristId;
 
   @override
   void initState() {
@@ -45,6 +46,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final data = snapshot.data();
       if (data == null) return;
 
+      final digitalTouristId = data['digitalTouristId'];
+      if (mounted) {
+        setState(() {
+          _digitalTouristId =
+              digitalTouristId is String && digitalTouristId.trim().isNotEmpty
+              ? digitalTouristId.trim()
+              : null;
+        });
+      }
       _nameController.text =
           (data['fullName'] as String?)?.trim() ?? _nameController.text;
       _phoneController.text = (data['phone'] as String?)?.trim() ?? '';
@@ -185,6 +195,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Text(
                             user?.email ?? 'No email available',
                             style: Theme.of(context).textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Permanent Digital Tourist ID',
+                            style: Theme.of(context).textTheme.labelLarge,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            _digitalTouristId ?? 'Not available',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                          Text(
+                            'This is your permanent system ID.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(color: colorScheme.onSurfaceVariant),
                           ),
                         ],
                       ),
